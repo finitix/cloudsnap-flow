@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
 import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
@@ -19,6 +21,25 @@ export default function ProjectDetail() {
   const [deploying, setDeploying] = useState(false);
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
   const [checkingName, setCheckingName] = useState(false);
+
+  // Domain dialog
+  const [showDomainDialog, setShowDomainDialog] = useState(false);
+  const [customDomain, setCustomDomain] = useState("");
+  const [domainAvailable, setDomainAvailable] = useState<boolean | null>(null);
+  const [checkingDomain, setCheckingDomain] = useState(false);
+
+  // Auto-refresh polling
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchDeployments = useCallback(async () => {
+    if (!id) return;
+    const { data } = await supabase
+      .from("deployments")
+      .select("*")
+      .eq("project_id", id)
+      .order("created_at", { ascending: false });
+    if (data) setDeployments(data);
+  }, [id]);
 
   useEffect(() => {
     if (!user || !id) return;
@@ -35,23 +56,47 @@ export default function ProjectDetail() {
     };
     load();
 
+    // Realtime channel
     const channel = supabase
       .channel(`deployments-${id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "deployments", filter: `project_id=eq.${id}` }, () => {
-        supabase.from("deployments").select("*").eq("project_id", id).order("created_at", { ascending: false }).then(({ data }) => {
-          setDeployments(data || []);
-        });
+        fetchDeployments();
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, id]);
+  }, [user, id, fetchDeployments]);
+
+  // Auto-refresh polling: every 4s when any deployment is in progress
+  useEffect(() => {
+    const hasActiveDeployment = deployments.some((d) =>
+      ["queued", "building", "deploying"].includes(d.status)
+    );
+
+    if (hasActiveDeployment) {
+      if (!pollingRef.current) {
+        pollingRef.current = setInterval(fetchDeployments, 4000);
+      }
+    } else {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    }
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [deployments, fetchDeployments]);
+
+  const getSelectedConn = () => connections.find((c) => c.id === selectedConnection);
 
   const checkNameAvailability = async () => {
-    if (!selectedConnection || !project) return;
-    const conn = connections.find((c) => c.id === selectedConnection);
-    if (!conn) return;
-
+    const conn = getSelectedConn();
+    if (!conn || !project) return;
     setCheckingName(true);
     setNameAvailable(null);
     try {
@@ -60,7 +105,7 @@ export default function ProjectDetail() {
       });
       if (error) throw error;
       setNameAvailable(data.available);
-      toast(data.available ? `"${data.projectName}" is available!` : `"${data.projectName}" already exists — will deploy to existing project.`);
+      toast(data.available ? `"${data.projectName}" is available!` : `"${data.projectName}" already exists — will deploy to it.`);
     } catch (err: any) {
       toast.error("Name check failed: " + err.message);
     } finally {
@@ -68,10 +113,45 @@ export default function ProjectDetail() {
     }
   };
 
+  const checkDomainAvailability = async () => {
+    const conn = getSelectedConn();
+    if (!conn || !customDomain) return;
+    setCheckingDomain(true);
+    setDomainAvailable(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "check-domain", domain: customDomain, provider: conn.provider, token: conn.token },
+      });
+      if (error) throw error;
+      setDomainAvailable(data.available);
+    } catch (err: any) {
+      toast.error("Domain check failed: " + err.message);
+    } finally {
+      setCheckingDomain(false);
+    }
+  };
+
+  const openDeployDialog = () => {
+    const conn = getSelectedConn();
+    if (!conn || !project) return;
+    // Pre-fill domain suggestion
+    const pn = project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (conn.provider === "vercel") {
+      setCustomDomain(`${pn}.vercel.app`);
+    } else if (conn.provider === "netlify") {
+      setCustomDomain(`${pn}.netlify.app`);
+    } else {
+      setCustomDomain("");
+    }
+    setDomainAvailable(null);
+    setShowDomainDialog(true);
+  };
+
   const handleDeploy = async () => {
+    setShowDomainDialog(false);
     if (!selectedConnection || !project) return;
     setDeploying(true);
-    const conn = connections.find((c) => c.id === selectedConnection);
+    const conn = getSelectedConn();
     if (!conn) return;
 
     try {
@@ -86,8 +166,14 @@ export default function ProjectDetail() {
 
       toast.success("Deployment queued!");
 
+      // Pass customDomain to edge function
       const { data, error: fnError } = await supabase.functions.invoke("deploy-project", {
-        body: { deploymentId: deployment.id, projectId: project.id, connectionId: conn.id },
+        body: {
+          deploymentId: deployment.id,
+          projectId: project.id,
+          connectionId: conn.id,
+          customDomain: customDomain || undefined,
+        },
       });
       if (fnError) {
         console.error("Deploy function error:", fnError);
@@ -102,14 +188,14 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleDeleteDeployment = async (deploymentId: string) => {
+  const handleDeleteDeployment = async (depId: string) => {
     if (!confirm("Delete this deployment record?")) return;
     try {
-      const { data, error } = await supabase.functions.invoke("deploy-project", {
-        body: { action: "delete", deploymentId },
+      const { error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "delete", deploymentId: depId },
       });
       if (error) throw error;
-      setDeployments((prev) => prev.filter((d) => d.id !== deploymentId));
+      setDeployments((prev) => prev.filter((d) => d.id !== depId));
       toast.success("Deployment deleted.");
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -117,6 +203,9 @@ export default function ProjectDetail() {
   };
 
   if (!project) return <DashboardLayout><div className="p-8 text-muted-foreground">Loading...</div></DashboardLayout>;
+
+  const conn = getSelectedConn();
+  const providerDomainSuffix = conn?.provider === "vercel" ? ".vercel.app" : conn?.provider === "netlify" ? ".netlify.app" : "";
 
   return (
     <DashboardLayout>
@@ -161,8 +250,8 @@ export default function ProjectDetail() {
             <Rocket className="h-4 w-4 text-primary" />
             Deploy
           </h3>
-          <div className="flex items-end gap-4">
-            <div className="flex-1">
+          <div className="flex items-end gap-4 flex-wrap">
+            <div className="flex-1 min-w-[200px]">
               <p className="text-xs text-muted-foreground mb-2">Select cloud connection</p>
               <Select value={selectedConnection} onValueChange={(v) => { setSelectedConnection(v); setNameAvailable(null); }}>
                 <SelectTrigger>
@@ -178,18 +267,18 @@ export default function ProjectDetail() {
               </Select>
             </div>
             <Button variant="outline" onClick={checkNameAvailability} disabled={checkingName || !selectedConnection}>
-              {checkingName ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : nameAvailable === true ? <CheckCircle className="h-4 w-4 mr-2 text-green-500" /> : nameAvailable === false ? <XCircle className="h-4 w-4 mr-2 text-yellow-500" /> : null}
+              {checkingName ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : nameAvailable === true ? <CheckCircle className="h-4 w-4 mr-2 text-primary" /> : nameAvailable === false ? <XCircle className="h-4 w-4 mr-2 text-destructive" /> : null}
               Check Name
             </Button>
-            <Button onClick={handleDeploy} disabled={deploying || !selectedConnection || project.status === "analyzing"}>
+            <Button onClick={openDeployDialog} disabled={deploying || !selectedConnection || project.status === "analyzing"}>
               {deploying ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Deploying...</> : <><Rocket className="h-4 w-4 mr-2" />Deploy Now</>}
             </Button>
           </div>
           {nameAvailable === true && (
-            <p className="text-xs text-green-500 mt-2">✅ Project name is available on the provider.</p>
+            <p className="text-xs text-primary mt-2">✅ Project name is available on the provider.</p>
           )}
           {nameAvailable === false && (
-            <p className="text-xs text-yellow-500 mt-2">⚠️ Project name already exists — deployment will update the existing project.</p>
+            <p className="text-xs text-muted-foreground mt-2">⚠️ Project exists — deployment will update it.</p>
           )}
           {connections.length === 0 && (
             <p className="text-xs text-muted-foreground mt-3">No connections found. <a href="/connections" className="text-primary hover:underline">Connect a cloud</a> first.</p>
@@ -198,8 +287,14 @@ export default function ProjectDetail() {
 
         {/* Deployments history */}
         <div className="glass-card rounded-xl overflow-hidden">
-          <div className="p-5 border-b border-border">
+          <div className="p-5 border-b border-border flex items-center justify-between">
             <h3 className="font-semibold">Deployment History</h3>
+            {deployments.some((d) => ["queued", "building", "deploying"].includes(d.status)) && (
+              <div className="flex items-center gap-2 text-xs text-primary">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Auto-refreshing...
+              </div>
+            )}
           </div>
           {deployments.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground text-sm">No deployments yet</div>
@@ -211,6 +306,9 @@ export default function ProjectDetail() {
                     <div className="flex items-center gap-3">
                       <StatusBadge status={d.status} />
                       <span className="text-sm capitalize">{d.provider}</span>
+                      {["queued", "building", "deploying"].includes(d.status) && (
+                        <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       {d.live_url && (
@@ -227,12 +325,10 @@ export default function ProjectDetail() {
                   {(d.status === "live" || d.cpu_usage != null) && (
                     <div className="flex gap-4">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Cpu className="h-3 w-3" />
-                        CPU: {d.cpu_usage != null ? `${d.cpu_usage}%` : "N/A"}
+                        <Cpu className="h-3 w-3" /> CPU: {d.cpu_usage != null ? `${d.cpu_usage}%` : "N/A"}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <HardDrive className="h-3 w-3" />
-                        Memory: {d.memory_usage != null ? `${d.memory_usage}MB` : "N/A"}
+                        <HardDrive className="h-3 w-3" /> Memory: {d.memory_usage != null ? `${d.memory_usage}MB` : "N/A"}
                       </div>
                     </div>
                   )}
@@ -242,7 +338,7 @@ export default function ProjectDetail() {
                     </div>
                   )}
                   {d.logs && (
-                    <pre className="bg-muted/50 text-xs rounded-lg p-3 font-mono max-h-48 overflow-auto text-muted-foreground whitespace-pre-wrap">
+                    <pre className="bg-muted/50 text-xs rounded-lg p-3 font-mono max-h-64 overflow-auto text-muted-foreground whitespace-pre-wrap">
                       {d.logs}
                     </pre>
                   )}
@@ -252,6 +348,55 @@ export default function ProjectDetail() {
           )}
         </div>
       </div>
+
+      {/* Domain dialog before deploy */}
+      <Dialog open={showDomainDialog} onOpenChange={setShowDomainDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5 text-primary" />
+              Configure Domain
+            </DialogTitle>
+            <DialogDescription>
+              Choose a domain/subdomain for your deployment. The default is the provider's subdomain.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <p className="text-xs text-muted-foreground mb-2">Domain / Subdomain</p>
+              <div className="flex gap-2">
+                <Input
+                  value={customDomain}
+                  onChange={(e) => { setCustomDomain(e.target.value); setDomainAvailable(null); }}
+                  placeholder={`my-project${providerDomainSuffix}`}
+                  className="font-mono text-sm"
+                />
+                <Button variant="outline" size="sm" onClick={checkDomainAvailability} disabled={checkingDomain || !customDomain}>
+                  {checkingDomain ? <RefreshCw className="h-3 w-3 animate-spin" /> : "Check"}
+                </Button>
+              </div>
+              {domainAvailable === true && (
+                <p className="text-xs text-primary mt-1">✅ Domain looks available!</p>
+              )}
+              {domainAvailable === false && (
+                <p className="text-xs text-destructive mt-1">❌ Domain may be taken. You can still try deploying.</p>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>• {conn?.provider === "vercel" ? "Vercel" : conn?.provider === "netlify" ? "Netlify" : "Provider"} will assign a default URL automatically.</p>
+              <p>• Custom domains can be configured after deployment too.</p>
+              <p>• Leave as-is to use the default provider subdomain.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDomainDialog(false)}>Cancel</Button>
+            <Button onClick={handleDeploy} disabled={deploying}>
+              <Rocket className="h-4 w-4 mr-2" />
+              Deploy
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
