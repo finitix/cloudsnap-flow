@@ -1,6 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 8192;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    for (let j = 0; j < chunk.length; j++) {
+      binary += String.fromCharCode(chunk[j]);
+    }
+  }
+  return btoa(binary);
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -217,7 +230,7 @@ serve(async (req) => {
         await appendLog("File downloaded. Creating Vercel deployment...");
 
         const fileContent = await fileData.arrayBuffer();
-        const base64Content = btoa(String.fromCharCode(...new Uint8Array(fileContent)));
+        const base64Content = arrayBufferToBase64(fileContent);
 
         const deployRes = await fetch("https://api.vercel.com/v13/deployments", {
           method: "POST",
