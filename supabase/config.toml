@@ -1,0 +1,4 @@
+project_id = "nzojkgxhkdfipxoofokp"
+
+[functions.deploy-project]
+verify_jwt = false
