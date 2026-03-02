@@ -6,7 +6,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw } from "lucide-react";
+import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
@@ -17,6 +17,8 @@ export default function ProjectDetail() {
   const [selectedConnection, setSelectedConnection] = useState("");
   const [deployments, setDeployments] = useState<any[]>([]);
   const [deploying, setDeploying] = useState(false);
+  const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
+  const [checkingName, setCheckingName] = useState(false);
 
   useEffect(() => {
     if (!user || !id) return;
@@ -33,7 +35,6 @@ export default function ProjectDetail() {
     };
     load();
 
-    // Realtime for deployments
     const channel = supabase
       .channel(`deployments-${id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "deployments", filter: `project_id=eq.${id}` }, () => {
@@ -45,6 +46,27 @@ export default function ProjectDetail() {
 
     return () => { supabase.removeChannel(channel); };
   }, [user, id]);
+
+  const checkNameAvailability = async () => {
+    if (!selectedConnection || !project) return;
+    const conn = connections.find((c) => c.id === selectedConnection);
+    if (!conn) return;
+
+    setCheckingName(true);
+    setNameAvailable(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "check-name", name: project.name, provider: conn.provider, token: conn.token },
+      });
+      if (error) throw error;
+      setNameAvailable(data.available);
+      toast(data.available ? `"${data.projectName}" is available!` : `"${data.projectName}" already exists — will deploy to existing project.`);
+    } catch (err: any) {
+      toast.error("Name check failed: " + err.message);
+    } finally {
+      setCheckingName(false);
+    }
+  };
 
   const handleDeploy = async () => {
     if (!selectedConnection || !project) return;
@@ -64,15 +86,33 @@ export default function ProjectDetail() {
 
       toast.success("Deployment queued!");
 
-      // Invoke edge function for actual deployment
-      const { error: fnError } = await supabase.functions.invoke("deploy-project", {
+      const { data, error: fnError } = await supabase.functions.invoke("deploy-project", {
         body: { deploymentId: deployment.id, projectId: project.id, connectionId: conn.id },
       });
-      if (fnError) console.error("Deploy function error:", fnError);
+      if (fnError) {
+        console.error("Deploy function error:", fnError);
+        toast.error("Deployment failed — check logs below.");
+      } else if (data?.success) {
+        toast.success("Deployed successfully!");
+      }
     } catch (err: any) {
       toast.error(err.message);
     } finally {
       setDeploying(false);
+    }
+  };
+
+  const handleDeleteDeployment = async (deploymentId: string) => {
+    if (!confirm("Delete this deployment record?")) return;
+    try {
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "delete", deploymentId },
+      });
+      if (error) throw error;
+      setDeployments((prev) => prev.filter((d) => d.id !== deploymentId));
+      toast.success("Deployment deleted.");
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
     }
   };
 
@@ -124,7 +164,7 @@ export default function ProjectDetail() {
           <div className="flex items-end gap-4">
             <div className="flex-1">
               <p className="text-xs text-muted-foreground mb-2">Select cloud connection</p>
-              <Select value={selectedConnection} onValueChange={setSelectedConnection}>
+              <Select value={selectedConnection} onValueChange={(v) => { setSelectedConnection(v); setNameAvailable(null); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Choose connection" />
                 </SelectTrigger>
@@ -137,10 +177,20 @@ export default function ProjectDetail() {
                 </SelectContent>
               </Select>
             </div>
+            <Button variant="outline" onClick={checkNameAvailability} disabled={checkingName || !selectedConnection}>
+              {checkingName ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : nameAvailable === true ? <CheckCircle className="h-4 w-4 mr-2 text-green-500" /> : nameAvailable === false ? <XCircle className="h-4 w-4 mr-2 text-yellow-500" /> : null}
+              Check Name
+            </Button>
             <Button onClick={handleDeploy} disabled={deploying || !selectedConnection || project.status === "analyzing"}>
               {deploying ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Deploying...</> : <><Rocket className="h-4 w-4 mr-2" />Deploy Now</>}
             </Button>
           </div>
+          {nameAvailable === true && (
+            <p className="text-xs text-green-500 mt-2">✅ Project name is available on the provider.</p>
+          )}
+          {nameAvailable === false && (
+            <p className="text-xs text-yellow-500 mt-2">⚠️ Project name already exists — deployment will update the existing project.</p>
+          )}
           {connections.length === 0 && (
             <p className="text-xs text-muted-foreground mt-3">No connections found. <a href="/connections" className="text-primary hover:underline">Connect a cloud</a> first.</p>
           )}
@@ -169,9 +219,11 @@ export default function ProjectDetail() {
                         </a>
                       )}
                       <span className="text-xs text-muted-foreground">{new Date(d.created_at).toLocaleString()}</span>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleDeleteDeployment(d.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
-                  {/* Monitoring */}
                   {(d.status === "live" || d.cpu_usage != null) && (
                     <div className="flex gap-4">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -190,7 +242,7 @@ export default function ProjectDetail() {
                     </div>
                   )}
                   {d.logs && (
-                    <pre className="bg-muted/50 text-xs rounded-lg p-3 font-mono max-h-32 overflow-auto text-muted-foreground">
+                    <pre className="bg-muted/50 text-xs rounded-lg p-3 font-mono max-h-48 overflow-auto text-muted-foreground whitespace-pre-wrap">
                       {d.logs}
                     </pre>
                   )}
