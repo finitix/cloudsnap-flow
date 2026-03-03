@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { Cloud, LayoutDashboard, FolderGit2, Plug, LogOut, Rocket } from "lucide-react";
+import { Cloud, LayoutDashboard, FolderGit2, Plug, LogOut, Rocket, Activity, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
@@ -9,6 +9,8 @@ const navItems = [
   { label: "Projects", icon: FolderGit2, path: "/projects" },
   { label: "Connections", icon: Plug, path: "/connections" },
   { label: "Deployments", icon: Rocket, path: "/deployments" },
+  { label: "Monitoring", icon: Activity, path: "/monitoring" },
+  { label: "Settings", icon: Settings, path: "/settings" },
 ];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -33,7 +35,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
         <nav className="flex-1 p-4 space-y-1">
           {navItems.map((item) => {
-            const active = location.pathname === item.path;
+            const active = location.pathname === item.path || (item.path !== "/dashboard" && location.pathname.startsWith(item.path));
             return (
               <Link
                 key={item.path}

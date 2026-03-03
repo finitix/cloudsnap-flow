@@ -11,6 +11,8 @@ import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Connections from "./pages/Connections";
 import Deployments from "./pages/Deployments";
+import Monitoring from "./pages/Monitoring";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +40,8 @@ const AppRoutes = () => (
     <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
     <Route path="/connections" element={<ProtectedRoute><Connections /></ProtectedRoute>} />
     <Route path="/deployments" element={<ProtectedRoute><Deployments /></ProtectedRoute>} />
+    <Route path="/monitoring" element={<ProtectedRoute><Monitoring /></ProtectedRoute>} />
+    <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
