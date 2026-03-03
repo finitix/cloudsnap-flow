@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { unzipSync, strFromU8 } from "https://esm.sh/fflate@0.8.2";
+import { unzipSync } from "https://esm.sh/fflate@0.8.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,24 +27,18 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// Extract files from ZIP and return Vercel-compatible file array
 function extractZipFiles(zipBuffer: ArrayBuffer): Array<{ file: string; data: string; encoding: string }> {
   const zipData = new Uint8Array(zipBuffer);
   const unzipped = unzipSync(zipData);
   const files: Array<{ file: string; data: string; encoding: string }> = [];
 
   for (const [path, content] of Object.entries(unzipped)) {
-    // Skip directories (they end with /) and hidden files
     if (path.endsWith("/") || path.startsWith("__MACOSX") || path.startsWith(".")) continue;
-
-    // Skip very large files (>5MB each) to avoid payload limits
     if (content.length > 5 * 1024 * 1024) continue;
 
-    // Remove top-level directory prefix if all files share one
     let cleanPath = path;
     const parts = path.split("/");
     if (parts.length > 1) {
-      // Check if there's a common root folder and strip it
       cleanPath = parts.slice(1).join("/") || parts[0];
     }
     if (!cleanPath || cleanPath.endsWith("/")) continue;
@@ -56,7 +50,6 @@ function extractZipFiles(zipBuffer: ArrayBuffer): Array<{ file: string; data: st
   return files;
 }
 
-// Detect if extracted files need a build step or are static
 function detectBuildNeeded(files: Array<{ file: string }>): boolean {
   return files.some(
     (f) =>
@@ -64,6 +57,12 @@ function detectBuildNeeded(files: Array<{ file: string }>): boolean {
       f.file === "requirements.txt" ||
       f.file === "Cargo.toml"
   );
+}
+
+// Generate a unique site name to avoid Netlify reserved word issues
+function generateUniqueSiteName(baseName: string): string {
+  const suffix = Math.random().toString(36).substring(2, 8);
+  return `${baseName}-${suffix}`;
 }
 
 serve(async (req) => {
@@ -105,7 +104,7 @@ serve(async (req) => {
           const data = await res.json();
           return json({ success: true, available, projectName, existing: data?.name });
         }
-        await res.text(); // consume body
+        await res.text();
         return json({ success: true, available: true, projectName });
       }
       if (provider === "netlify") {
@@ -124,11 +123,14 @@ serve(async (req) => {
       if (!domain || !token) throw new Error("Missing domain or token");
 
       if (provider === "vercel") {
-        const res = await fetch(`https://api.vercel.com/v4/domains/status?name=${encodeURIComponent(domain)}`, {
+        // For vercel subdomains, check if the project name exists
+        const projName = domain.replace(/\.vercel\.app$/, "");
+        const res = await fetch(`https://api.vercel.com/v9/projects/${projName}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const data = await res.json();
-        return json({ success: true, domain, available: data?.available ?? true, status: data });
+        const available = res.status === 404;
+        await res.text();
+        return json({ success: true, domain, available });
       }
       if (provider === "netlify") {
         const siteName = domain.replace(/\.netlify\.app$/, "");
@@ -195,20 +197,26 @@ serve(async (req) => {
     const provider = connection.provider;
     const token = connection.token;
     const projectName = project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    
+    // Extract desired subdomain from customDomain
+    let desiredSubdomain = customDomain
+      ? customDomain.replace(/\.(vercel\.app|netlify\.app)$/, "").toLowerCase().replace(/[^a-z0-9-]/g, "-")
+      : projectName;
+    
     let liveUrl = "";
     let deployId = "";
 
-    await appendLog(`Provider: ${provider} | Project: ${projectName} | Source: ${project.source_type}`);
+    await appendLog(`Provider: ${provider} | Project: ${projectName} | Desired subdomain: ${desiredSubdomain} | Source: ${project.source_type}`);
 
     if (provider === "vercel") {
       // Check project existence
       await appendLog("Checking Vercel project...");
-      const checkRes = await fetch(`https://api.vercel.com/v9/projects/${projectName}`, {
+      const checkRes = await fetch(`https://api.vercel.com/v9/projects/${desiredSubdomain}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const nameExists = checkRes.status !== 404;
-      await checkRes.text(); // consume
-      await appendLog(nameExists ? `"${projectName}" exists — deploying to it.` : `"${projectName}" is new.`);
+      await checkRes.text();
+      await appendLog(nameExists ? `"${desiredSubdomain}" exists — deploying to it.` : `"${desiredSubdomain}" is new.`);
 
       if (project.source_type === "github" && project.github_url) {
         const match = project.github_url.match(/github\.com\/([^/]+)\/([^/]+)/);
@@ -223,7 +231,7 @@ serve(async (req) => {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: projectName,
+              name: desiredSubdomain,
               framework: project.framework?.toLowerCase() === "next.js" ? "nextjs" : project.framework?.toLowerCase() === "react" ? "vite" : null,
               gitRepository: { type: "github", repo: `${repoOrg}/${repoName}` },
               buildCommand: project.build_command || undefined,
@@ -243,7 +251,7 @@ serve(async (req) => {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: projectName,
+            name: desiredSubdomain,
             gitSource: { type: "github", org: repoOrg, repo: repoName, ref: "main" },
           }),
         });
@@ -265,8 +273,7 @@ serve(async (req) => {
           await appendLog(`Build: ${sd.readyState}`);
           if (sd.readyState === "READY") { liveUrl = `https://${sd.url}`; await appendLog(`Live ✓ → ${liveUrl}`); break; }
           if (sd.readyState === "ERROR" || sd.readyState === "CANCELED") {
-            const errMsg = sd.errorMessage || sd.readyState;
-            throw new Error(`Build failed: ${errMsg}`);
+            throw new Error(`Build failed: ${sd.errorMessage || sd.readyState}`);
           }
           attempts++;
         }
@@ -290,15 +297,12 @@ serve(async (req) => {
         const zipBuffer = await fileData.arrayBuffer();
         await appendLog(`ZIP downloaded: ${zipBuffer.byteLength} bytes. Extracting...`);
 
-        // Extract ZIP files
         let extractedFiles: Array<{ file: string; data: string; encoding: string }>;
         try {
           extractedFiles = extractZipFiles(zipBuffer);
           await appendLog(`Extracted ${extractedFiles.length} files from ZIP`);
         } catch (extractErr: any) {
           await appendLog(`ZIP extraction failed: ${extractErr.message}. Deploying as static file.`);
-          // Fallback: deploy as single file
-          const b64 = arrayBufferToBase64(zipBuffer);
           extractedFiles = [{
             file: "index.html",
             data: arrayBufferToBase64(
@@ -310,21 +314,34 @@ serve(async (req) => {
           }];
         }
 
-        // Log first 10 file names
         const fileNames = extractedFiles.slice(0, 10).map((f) => f.file);
         await appendLog(`Files: ${fileNames.join(", ")}${extractedFiles.length > 10 ? ` ...+${extractedFiles.length - 10} more` : ""}`);
 
-        // Detect if build is needed
         const needsBuild = detectBuildNeeded(extractedFiles);
         await appendLog(needsBuild ? "Build-required project detected (has package.json)" : "Static project detected — no build step");
 
-        // Create Vercel deployment with individual files
+        // Create or ensure the Vercel project exists with the desired name
+        if (!nameExists) {
+          await appendLog(`Creating Vercel project "${desiredSubdomain}"...`);
+          const createRes = await fetch("https://api.vercel.com/v10/projects", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ name: desiredSubdomain }),
+          });
+          const createData = await createRes.json();
+          if (!createRes.ok && createData?.error?.code !== "project_already_exists") {
+            await appendLog(`Project create warning: ${JSON.stringify(createData)}`);
+          } else {
+            await appendLog(`Vercel project "${desiredSubdomain}" created ✓`);
+          }
+        }
+
         const deployPayload: any = {
-          name: projectName,
+          name: desiredSubdomain,
           files: extractedFiles,
+          project: desiredSubdomain,
         };
 
-        // Only set build settings if a build is actually needed
         if (needsBuild) {
           deployPayload.projectSettings = {
             buildCommand: project.build_command || "npm run build",
@@ -332,9 +349,9 @@ serve(async (req) => {
             framework: project.framework?.toLowerCase() === "react" ? "vite"
               : project.framework?.toLowerCase() === "next.js" ? "nextjs"
               : null,
+            installCommand: "npm install --legacy-peer-deps",
           };
         }
-        // For static sites, Vercel will serve files directly — no build command
 
         await appendLog("Sending files to Vercel...");
 
@@ -348,9 +365,9 @@ serve(async (req) => {
         if (!dr.ok) {
           await appendLog(`Deploy error: ${JSON.stringify(dd)}`);
 
-          // If build fails, retry as static deployment without build
-          if (dd?.error?.message?.includes("build") || dd?.error?.code === "BUILD_FAILED") {
-            await appendLog("Build failed — retrying as static deployment...");
+          // If build fails, retry as static deployment
+          if (needsBuild) {
+            await appendLog("Build setup failed — retrying as static deployment...");
             delete deployPayload.projectSettings;
             const retryRes = await fetch("https://api.vercel.com/v13/deployments", {
               method: "POST",
@@ -373,8 +390,8 @@ serve(async (req) => {
 
         // Poll for completion
         let attempts = 0;
-        while (attempts < 40) {
-          await new Promise((r) => setTimeout(r, 4000));
+        while (attempts < 60) {
+          await new Promise((r) => setTimeout(r, 5000));
           const sr = await fetch(`https://api.vercel.com/v13/deployments/${deployId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -382,14 +399,17 @@ serve(async (req) => {
           await appendLog(`Build: ${sd.readyState}`);
           if (sd.readyState === "READY") {
             liveUrl = `https://${sd.url}`;
-            await appendLog(`Live ✓ → ${liveUrl}`);
+            // The production URL should be desiredSubdomain.vercel.app
+            const productionUrl = `https://${desiredSubdomain}.vercel.app`;
+            await appendLog(`Live ✓ → ${productionUrl}`);
+            liveUrl = productionUrl;
             break;
           }
           if (sd.readyState === "ERROR" || sd.readyState === "CANCELED") {
             const errDetail = sd.errorMessage || sd.readyState;
-            await appendLog(`Build error details: ${errDetail}`);
+            await appendLog(`Build error: ${errDetail}`);
             // If build error, retry without build command
-            if (!deployPayload._retriedStatic) {
+            if (needsBuild && !deployPayload._retriedStatic) {
               await appendLog("Retrying as static site (no build)...");
               delete deployPayload.projectSettings;
               deployPayload._retriedStatic = true;
@@ -403,7 +423,7 @@ serve(async (req) => {
                 deployId = retryData.id;
                 liveUrl = `https://${retryData.url}`;
                 await appendLog(`Static retry deployment: ${deployId}`);
-                attempts = 0; // reset polling
+                attempts = 0;
                 continue;
               }
             }
@@ -413,23 +433,22 @@ serve(async (req) => {
         }
       }
 
-      // Add custom domain if provided
-      if (customDomain && projectName && !customDomain.endsWith(".vercel.app")) {
-        await appendLog(`Adding custom domain: ${customDomain}...`);
-        const domRes = await fetch(`https://api.vercel.com/v10/projects/${encodeURIComponent(projectName)}/domains`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ name: customDomain }),
-        });
-        const domData = await domRes.json();
-        await appendLog(domRes.ok ? `Domain ${customDomain} added ✓` : `Domain warning: ${domData?.error?.message || JSON.stringify(domData)}`);
-      }
-
     } else if (provider === "netlify") {
       await appendLog("Starting Netlify deployment...", { status: "deploying" });
-      const siteName = customDomain
-        ? customDomain.replace(/\.netlify\.app$/, "")
-        : `${projectName}-${Date.now()}`;
+      
+      // Use customDomain subdomain or generate unique name to avoid reserved words
+      let siteName = desiredSubdomain;
+      
+      // Always try with the desired name first, if it fails with reserved word, add suffix
+      const createSite = async (name: string): Promise<any> => {
+        const res = await fetch("https://api.netlify.com/api/v1/sites", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        return { ok: res.ok, data };
+      };
 
       if (project.source_type === "github" && project.github_url) {
         await appendLog("Creating Netlify site from GitHub...");
@@ -447,40 +466,141 @@ serve(async (req) => {
             },
           }),
         });
-        const sd = await cr.json();
-        if (!cr.ok) { await appendLog(`Netlify error: ${JSON.stringify(sd)}`); throw new Error(JSON.stringify(sd)); }
+        let sd = await cr.json();
+        
+        // If reserved word error, retry with unique suffix
+        if (!cr.ok) {
+          const errStr = JSON.stringify(sd);
+          if (errStr.includes("reserved word") || errStr.includes("subdomain")) {
+            siteName = generateUniqueSiteName(siteName);
+            await appendLog(`"${desiredSubdomain}" is reserved. Trying "${siteName}"...`);
+            const retryRes = await fetch("https://api.netlify.com/api/v1/sites", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: siteName,
+                repo: {
+                  provider: "github",
+                  repo: project.github_url.replace("https://github.com/", ""),
+                  branch: "main",
+                  cmd: project.build_command || "npm run build",
+                  dir: project.output_dir || "dist",
+                },
+              }),
+            });
+            sd = await retryRes.json();
+            if (!retryRes.ok) throw new Error(`Netlify error: ${JSON.stringify(sd)}`);
+          } else {
+            throw new Error(`Netlify error: ${errStr}`);
+          }
+        }
+        
         deployId = sd.id;
         liveUrl = sd.ssl_url || sd.url || `https://${siteName}.netlify.app`;
         await appendLog(`Site live: ${liveUrl}`);
-      } else if (project.source_type === "zip") {
-        await appendLog("Creating Netlify site...");
-        const cr = await fetch("https://api.netlify.com/api/v1/sites", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ name: siteName }),
-        });
-        const sd = await cr.json();
-        if (!cr.ok) throw new Error(`Site creation failed: ${JSON.stringify(sd)}`);
 
-        await appendLog(`Site ${sd.id} created. Uploading ZIP...`);
+      } else if (project.source_type === "zip") {
+        await appendLog(`Creating Netlify site "${siteName}"...`);
+        
+        let result = await createSite(siteName);
+        
+        // If reserved word or taken, retry with unique suffix
+        if (!result.ok) {
+          const errStr = JSON.stringify(result.data);
+          if (errStr.includes("reserved") || errStr.includes("subdomain") || errStr.includes("taken")) {
+            siteName = generateUniqueSiteName(desiredSubdomain);
+            await appendLog(`"${desiredSubdomain}" is reserved/taken. Trying "${siteName}"...`);
+            result = await createSite(siteName);
+            if (!result.ok) throw new Error(`Site creation failed: ${JSON.stringify(result.data)}`);
+          } else {
+            throw new Error(`Site creation failed: ${errStr}`);
+          }
+        }
+        
+        const sd = result.data;
+        await appendLog(`Site ${sd.id} created as "${siteName}". Uploading ZIP...`);
+        
         const { data: fileList } = await supabase.storage.from("project-uploads")
           .list(project.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
 
         if (fileList && fileList.length > 0) {
           const { data: fileData } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fileList[0].name}`);
           if (fileData) {
-            const dr = await fetch(`https://api.netlify.com/api/v1/sites/${sd.id}/deploys`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/zip" },
-              body: fileData,
-            });
-            const dd = await dr.json();
-            if (!dr.ok) throw new Error(`Deploy failed: ${JSON.stringify(dd)}`);
-            await appendLog("ZIP uploaded ✓");
+            // Extract ZIP and check if it needs building
+            const zipBuffer = await fileData.arrayBuffer();
+            let extractedFiles: Array<{ file: string; data: string; encoding: string }> = [];
+            let needsBuild = false;
+            
+            try {
+              extractedFiles = extractZipFiles(zipBuffer);
+              needsBuild = detectBuildNeeded(extractedFiles);
+            } catch {
+              // If extraction fails, deploy raw zip
+            }
+
+            if (needsBuild) {
+              // For build-required projects on Netlify, we need to deploy via their build system
+              // Upload the zip as a deploy with build settings
+              await appendLog("Build-required project. Deploying with build...");
+              
+              // Re-download fresh copy for upload
+              const { data: freshFile } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fileList[0].name}`);
+              if (freshFile) {
+                const dr = await fetch(`https://api.netlify.com/api/v1/sites/${sd.id}/deploys`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/zip" },
+                  body: freshFile,
+                });
+                const dd = await dr.json();
+                if (!dr.ok) {
+                  await appendLog(`Deploy error: ${JSON.stringify(dd)}`);
+                  throw new Error(`Deploy failed: ${JSON.stringify(dd)}`);
+                }
+                await appendLog("ZIP uploaded ✓");
+                
+                // Poll Netlify deploy status
+                if (dd.id) {
+                  let pollAttempts = 0;
+                  while (pollAttempts < 40) {
+                    await new Promise((r) => setTimeout(r, 4000));
+                    const statusRes = await fetch(`https://api.netlify.com/api/v1/deploys/${dd.id}`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    const statusData = await statusRes.json();
+                    await appendLog(`Build: ${statusData.state}`);
+                    if (statusData.state === "ready") {
+                      liveUrl = statusData.ssl_url || statusData.url || `https://${siteName}.netlify.app`;
+                      await appendLog(`Live ✓ → ${liveUrl}`);
+                      break;
+                    }
+                    if (statusData.state === "error") {
+                      throw new Error(`Netlify build failed: ${statusData.error_message || "Unknown error"}`);
+                    }
+                    pollAttempts++;
+                  }
+                }
+              }
+            } else {
+              // Static site - direct deploy
+              const { data: freshFile } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fileList[0].name}`);
+              if (freshFile) {
+                const dr = await fetch(`https://api.netlify.com/api/v1/sites/${sd.id}/deploys`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/zip" },
+                  body: freshFile,
+                });
+                const dd = await dr.json();
+                if (!dr.ok) throw new Error(`Deploy failed: ${JSON.stringify(dd)}`);
+                await appendLog("ZIP uploaded ✓");
+              }
+            }
           }
         }
+        
         deployId = sd.id;
-        liveUrl = sd.ssl_url || sd.url || `https://${siteName}.netlify.app`;
+        if (!liveUrl) {
+          liveUrl = sd.ssl_url || sd.url || `https://${siteName}.netlify.app`;
+        }
       }
     }
 
