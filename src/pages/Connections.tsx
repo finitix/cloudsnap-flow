@@ -6,6 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Trash2, ExternalLink, Server, Globe, Cloud, Lock } from "lucide-react";
 import { toast } from "sonner";
@@ -34,6 +44,8 @@ export default function Connections() {
   const [token, setToken] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
     if (!user) return;
@@ -70,11 +82,22 @@ export default function Connections() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Remove this connection?")) return;
-    await supabase.from("cloud_connections").delete().eq("id", id);
-    toast.success("Connection removed");
-    load();
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "delete-connection", connectionId: deleteTarget.id },
+      });
+      if (error) throw error;
+      setConnections((prev) => prev.filter((c) => c.id !== deleteTarget.id));
+      toast.success("Connection and related deployments removed");
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
+    }
   };
 
   const getProviderIcon = (provider: string) => {
@@ -208,7 +231,6 @@ export default function Connections() {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Group by category */}
             {["Frontend", "Backend"].map((category) => {
               const filtered = connections.filter((c) => getCategoryLabel(c.provider) === category);
               if (filtered.length === 0) return null;
@@ -230,7 +252,11 @@ export default function Connections() {
                             <p className="text-xs text-muted-foreground capitalize">{c.provider} • Connected {new Date(c.connected_at).toLocaleDateString()}</p>
                           </div>
                         </div>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteTarget({ id: c.id, name: c.display_name || c.provider })}
+                        >
                           <Trash2 className="h-4 w-4 text-muted-foreground" />
                         </Button>
                       </div>
@@ -242,6 +268,28 @@ export default function Connections() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Connection</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove <strong>{deleteTarget?.name}</strong>? This will also delete all deployment records associated with this connection. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Removing..." : "Remove Connection"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
