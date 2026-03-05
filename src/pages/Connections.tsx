@@ -22,12 +22,10 @@ import { toast } from "sonner";
 
 const frontendProviders = [
   { id: "vercel", name: "Vercel", description: "Deploy frontend & full-stack apps", tokenUrl: "https://vercel.com/account/tokens", category: "frontend" },
-  { id: "netlify", name: "Netlify", description: "Deploy static sites & serverless", tokenUrl: "https://app.netlify.com/user/applications#personal-access-tokens", category: "frontend" },
 ];
 
 const backendProviders = [
-  { id: "render", name: "Render", description: "Modern PaaS for backend services — Node.js, Python, Ruby, Go. Free tier with HTTPS & managed PostgreSQL.", tokenUrl: "https://dashboard.render.com/account/api-keys", category: "backend" },
-  { id: "railway", name: "Railway", description: "Developer-friendly deployment with auto-detection for many languages. Built-in PostgreSQL/MySQL.", tokenUrl: "https://railway.app/account/tokens", category: "backend" },
+  { id: "render", name: "Render", description: "Modern PaaS for backend services — Node.js, Python, Ruby, Go. Free tier with HTTPS & managed PostgreSQL.", tokenUrl: "https://dashboard.render.com/u/settings#api-keys", category: "backend" },
 ];
 
 const comingSoonProviders = [
@@ -101,14 +99,14 @@ export default function Connections() {
   };
 
   const getProviderIcon = (provider: string) => {
-    if (["vercel", "netlify"].includes(provider)) return <Globe className="h-5 w-5" />;
-    if (["render", "railway"].includes(provider)) return <Server className="h-5 w-5" />;
+    if (provider === "vercel") return <Globe className="h-5 w-5" />;
+    if (provider === "render") return <Server className="h-5 w-5" />;
     return <Cloud className="h-5 w-5" />;
   };
 
   const getCategoryLabel = (provider: string) => {
-    if (["vercel", "netlify"].includes(provider)) return "Frontend";
-    if (["render", "railway"].includes(provider)) return "Backend";
+    if (provider === "vercel") return "Frontend";
+    if (provider === "render") return "Backend";
     return "Cloud";
   };
 
@@ -219,14 +217,13 @@ export default function Connections() {
           </Dialog>
         </div>
 
-        {/* Connected */}
         {connections.length === 0 ? (
           <div className="glass-card rounded-xl p-16 text-center">
             <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
               <Plus className="h-5 w-5 text-primary" />
             </div>
             <h3 className="font-semibold mb-2">No connections yet</h3>
-            <p className="text-sm text-muted-foreground mb-4">Connect Vercel, Netlify, Render, or Railway to start deploying</p>
+            <p className="text-sm text-muted-foreground mb-4">Connect Vercel (frontend) or Render (backend) to start deploying</p>
             <Button variant="outline" onClick={() => setOpen(true)}>Connect Cloud</Button>
           </div>
         ) : (
@@ -269,7 +266,6 @@ export default function Connections() {
         )}
       </div>
 
-      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
