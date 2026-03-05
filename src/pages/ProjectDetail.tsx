@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe } from "lucide-react";
+import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
@@ -19,6 +19,7 @@ export default function ProjectDetail() {
   const [selectedConnection, setSelectedConnection] = useState("");
   const [deployments, setDeployments] = useState<any[]>([]);
   const [deploying, setDeploying] = useState(false);
+  const [redeploying, setRedeploying] = useState<string | null>(null);
   const [showDomainDialog, setShowDomainDialog] = useState(false);
   const [projectSubdomain, setProjectSubdomain] = useState("");
   const [domainAvailable, setDomainAvailable] = useState<boolean | null>(null);
@@ -61,7 +62,6 @@ export default function ProjectDetail() {
     return () => { supabase.removeChannel(channel); };
   }, [user, id, fetchDeployments]);
 
-  // Auto-refresh polling when deployments are active
   useEffect(() => {
     const hasActive = deployments.some((d) => ["queued", "building", "deploying"].includes(d.status));
     if (hasActive && !pollingRef.current) {
@@ -78,10 +78,14 @@ export default function ProjectDetail() {
   const getProviderDomain = () => {
     const conn = getConn();
     if (!conn) return "";
-    return conn.provider === "vercel" ? ".vercel.app" : conn.provider === "netlify" ? ".netlify.app" : "";
+    if (conn.provider === "vercel") return ".vercel.app";
+    if (conn.provider === "render") return ".onrender.com";
+    return "";
   };
 
-  // Real-time domain check with debounce
+  const frontendConnections = connections.filter((c) => c.provider === "vercel");
+  const backendConnections = connections.filter((c) => c.provider === "render");
+
   const checkDomainRealtime = useCallback(async (subdomain: string) => {
     const conn = getConn();
     if (!conn || !subdomain || subdomain.length < 2) { setDomainAvailable(null); return; }
@@ -114,7 +118,6 @@ export default function ProjectDetail() {
     setProjectSubdomain(pn);
     setDomainAvailable(null);
     setShowDomainDialog(true);
-    // Trigger initial check
     setTimeout(() => checkDomainRealtime(pn), 300);
   };
 
@@ -164,6 +167,26 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleRedeploy = async (depId: string) => {
+    setRedeploying(depId);
+    try {
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "redeploy", deploymentId: depId },
+      });
+      if (error) throw error;
+      if (data?.success) {
+        toast.success("Redeployment successful!");
+      } else {
+        toast.error("Redeploy failed");
+      }
+      fetchDeployments();
+    } catch (err: any) {
+      toast.error("Redeploy failed: " + err.message);
+    } finally {
+      setRedeploying(null);
+    }
+  };
+
   const handleDeleteDeployment = async (depId: string) => {
     if (!confirm("Delete this deployment record?")) return;
     try {
@@ -182,6 +205,7 @@ export default function ProjectDetail() {
 
   const conn = getConn();
   const providerSuffix = getProviderDomain();
+  const hasBothTypes = frontendConnections.length > 0 && backendConnections.length > 0;
 
   return (
     <DashboardLayout>
@@ -230,7 +254,19 @@ export default function ProjectDetail() {
               <Select value={selectedConnection} onValueChange={(v) => { setSelectedConnection(v); }}>
                 <SelectTrigger><SelectValue placeholder="Choose connection" /></SelectTrigger>
                 <SelectContent>
-                  {connections.map((c) => (
+                  {connections.length > 0 && hasBothTypes && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-1"><Globe className="h-3 w-3" /> Frontend</div>
+                      {frontendConnections.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.display_name || c.provider} ({c.provider})</SelectItem>
+                      ))}
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-1 mt-1"><Server className="h-3 w-3" /> Backend</div>
+                      {backendConnections.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.display_name || c.provider} ({c.provider})</SelectItem>
+                      ))}
+                    </>
+                  )}
+                  {connections.length > 0 && !hasBothTypes && connections.map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.display_name || c.provider} ({c.provider})</SelectItem>
                   ))}
                 </SelectContent>
@@ -242,6 +278,11 @@ export default function ProjectDetail() {
           </div>
           {connections.length === 0 && (
             <p className="text-xs text-muted-foreground mt-3">No connections. <a href="/connections" className="text-primary hover:underline">Connect a cloud</a> first.</p>
+          )}
+          {hasBothTypes && (
+            <p className="text-xs text-muted-foreground mt-3 bg-muted/50 rounded-lg p-2">
+              💡 You have both frontend (Vercel) and backend (Render) connections. Select the appropriate one for your deployment target.
+            </p>
           )}
         </div>
 
@@ -270,6 +311,17 @@ export default function ProjectDetail() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
+                      {d.status === "live" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRedeploy(d.id)}
+                          disabled={redeploying === d.id}
+                          className="text-xs"
+                        >
+                          {redeploying === d.id ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Redeploying...</> : <><RefreshCw className="h-3 w-3 mr-1" />Redeploy</>}
+                        </Button>
+                      )}
                       {d.live_url && (
                         <a href={d.live_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
                           Visit <ExternalLink className="h-3 w-3" />
@@ -304,7 +356,7 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      {/* Domain Dialog - Now asks for project name/subdomain first */}
+      {/* Domain Dialog */}
       <Dialog open={showDomainDialog} onOpenChange={setShowDomainDialog}>
         <DialogContent>
           <DialogHeader>
@@ -312,7 +364,7 @@ export default function ProjectDetail() {
               <Globe className="h-5 w-5 text-primary" /> Configure Project Name
             </DialogTitle>
             <DialogDescription>
-              Choose a name for your deployment. This will be your subdomain on {conn?.provider || "the provider"}.
+              Choose a name for your deployment on {conn?.provider || "the provider"}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
