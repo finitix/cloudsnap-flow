@@ -359,7 +359,7 @@ async function deployToRender(
       }
     }
 
-    await appendLog(`Detected runtime: ${runtime}`);
+    await appendLog(`Detected runtime: ${runtime} | build: ${buildCommand} | start: ${startCommand}`);
 
     if (!githubUrl) {
       throw new Error("Render deployment requires a GitHub URL. Please create your project from a GitHub repository.");
