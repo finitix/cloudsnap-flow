@@ -272,7 +272,9 @@ async function deployToVercel(
 async function deployToRender(
   token: string, serviceName: string, githubUrl: string | null, files: ExtractedFile[],
   appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>,
-  envVars?: Array<{ key: string; value: string }>
+  envVars?: Array<{ key: string; value: string }>,
+  userStartCommand?: string,
+  userBuildCommand?: string,
 ): Promise<{ deployId: string; liveUrl: string }> {
   const RENDER_API = "https://api.render.com/v1";
   const headers = {
@@ -358,6 +360,10 @@ async function deployToRender(
         } catch {}
       }
     }
+
+    // Override with user-provided commands if specified
+    if (userStartCommand) startCommand = userStartCommand;
+    if (userBuildCommand) buildCommand = userBuildCommand;
 
     await appendLog(`Detected runtime: ${runtime} | build: ${buildCommand} | start: ${startCommand}`);
 
@@ -759,7 +765,7 @@ serve(async (req) => {
     // ── Deploy ──
     // ══════════════════════════════════════
     deploymentId = body.deploymentId;
-    const { projectId, connectionId, customDomain, envVars } = body;
+    const { projectId, connectionId, customDomain, envVars, customStartCommand, customBuildCommand } = body;
 
     if (!deploymentId || !projectId || !connectionId) {
       throw new Error(`Missing: deploymentId=${deploymentId}, projectId=${projectId}, connectionId=${connectionId}`);
@@ -841,7 +847,7 @@ serve(async (req) => {
     if (provider === "vercel") {
       result = await deployToVercel(token, desiredSubdomain, extractedFiles, needsBuild, project.build_command, project.output_dir, project.framework, appendLog);
     } else if (provider === "render") {
-      result = await deployToRender(token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars);
+      result = await deployToRender(token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars, customStartCommand, customBuildCommand);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
