@@ -252,6 +252,28 @@ export default function ProjectDetail() {
               {project.framework || "Unknown"} • {project.project_type || "Detecting..."} • {project.source_type}
             </p>
           </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={deletingProject}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                {deletingProject ? "Deleting..." : "Delete Project"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete "{project.name}" permanently?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete the project, all its deployments, and associated files. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Delete Forever
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
 
         {/* Analysis */}
