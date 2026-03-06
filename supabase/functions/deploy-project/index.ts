@@ -297,6 +297,17 @@ async function deployToRender(
     "Content-Type": "application/json",
   };
 
+  // Fetch owner ID from Render API
+  await appendLog("Fetching Render account info...");
+  const ownerRes = await fetch(`${RENDER_API}/owners`, { headers });
+  const ownerData = await ownerRes.json();
+  if (!ownerRes.ok || !ownerData || ownerData.length === 0) {
+    throw new Error("Failed to fetch Render owner info. Check your API token.");
+  }
+  const ownerId = ownerData[0]?.owner?.id || ownerData[0]?.id;
+  if (!ownerId) throw new Error("Could not determine Render owner ID");
+  await appendLog(`Render owner: ${ownerId}`);
+
   // Check for existing service
   await appendLog("Checking existing Render services...");
   const listRes = await fetch(`${RENDER_API}/services?name=${encodeURIComponent(serviceName)}&limit=1`, { headers });
@@ -351,6 +362,7 @@ async function deployToRender(
         body: JSON.stringify({
           type: "web_service",
           name: serviceName,
+          ownerId,
           repo: repoUrl,
           autoDeploy: "yes",
           branch: "main",
@@ -373,6 +385,7 @@ async function deployToRender(
             body: JSON.stringify({
               type: "web_service",
               name: serviceName,
+              ownerId,
               repo: repoUrl,
               autoDeploy: "yes",
               branch: "master",
@@ -404,6 +417,7 @@ async function deployToRender(
         body: JSON.stringify({
           type: "web_service",
           name: serviceName,
+          ownerId,
           runtime: "docker",
           plan: "free",
           region: "oregon",
