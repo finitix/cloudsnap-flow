@@ -603,6 +603,14 @@ export default function ProjectDetail() {
                   {d.logs && (
                     <pre className="bg-muted/50 text-xs rounded-lg p-3 font-mono max-h-64 overflow-auto text-muted-foreground whitespace-pre-wrap">{d.logs}</pre>
                   )}
+                  {renderLogs[d.id] && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold flex items-center gap-1"><ScrollText className="h-3 w-3 text-primary" /> Provider Logs</p>
+                      <pre className="bg-background/80 text-xs rounded-lg p-3 font-mono max-h-64 overflow-auto text-muted-foreground whitespace-pre-wrap border border-border/50">
+                        {renderLogs[d.id].join("\n")}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
