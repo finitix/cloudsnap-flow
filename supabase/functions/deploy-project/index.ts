@@ -440,10 +440,10 @@ async function deployToRender(
     deployId = serviceId;
   }
 
-  // Poll for deploy status
+  // Poll for deploy status (5s intervals)
   let attempts = 0;
-  while (attempts < 60) {
-    await new Promise((r) => setTimeout(r, 10000));
+  while (attempts < 90) {
+    await new Promise((r) => setTimeout(r, 5000));
     try {
       const statusRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
       if (statusRes.ok && Array.isArray(statusRes.data) && statusRes.data.length > 0) {
@@ -455,6 +455,17 @@ async function deployToRender(
           break;
         }
         if (status === "deactivated" || status === "build_failed" || status === "update_failed" || status === "canceled") {
+          // Try to fetch build logs for better error info
+          const latestDeployId = latest.id;
+          if (latestDeployId) {
+            const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestDeployId}/logs`, { headers });
+            if (logRes.ok && Array.isArray(logRes.data)) {
+              const logLines = logRes.data.map((l: any) => l.message || l.log || JSON.stringify(l)).join("\n");
+              await appendLog(`Build logs:\n${logLines.slice(-2000)}`);
+            }
+          }
+          throw new Error(`Render deploy failed: ${status}. Check the build logs above for details.`);
+        }
           throw new Error(`Render deploy failed: ${status}`);
         }
       }
