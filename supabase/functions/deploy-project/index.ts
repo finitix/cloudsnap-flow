@@ -502,6 +502,158 @@ serve(async (req) => {
     const body = await req.json();
     const { action } = body;
 
+    // ── Fetch Render service logs ──
+    if (action === "fetch-logs") {
+      const { deploymentId: depId } = body;
+      if (!depId) throw new Error("Missing deploymentId");
+
+      const { data: dep, error: depErr } = await supabase
+        .from("deployments")
+        .select("*, cloud_connections(*)")
+        .eq("id", depId)
+        .single();
+      if (depErr || !dep) throw new Error("Deployment not found");
+
+      const connection = (dep as any).cloud_connections;
+      if (!connection) throw new Error("Connection not found");
+
+      const token = connection.token;
+      const RENDER_API = "https://api.render.com/v1";
+      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+      // Resolve service ID
+      let serviceId = dep.deploy_id;
+      if (!serviceId && dep.live_url) {
+        const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers });
+        if (listRes.ok && Array.isArray(listRes.data) && listRes.data.length > 0) {
+          serviceId = listRes.data[0].service?.id;
+        }
+      }
+      if (!serviceId) throw new Error("Could not find Render service ID");
+
+      // Fetch latest deploy logs
+      const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
+      let deployLogs: any[] = [];
+      if (deploysRes.ok && Array.isArray(deploysRes.data) && deploysRes.data.length > 0) {
+        const latestDeployId = deploysRes.data[0]?.deploy?.id || deploysRes.data[0]?.id;
+        if (latestDeployId) {
+          const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestDeployId}/logs`, { headers });
+          if (logRes.ok && Array.isArray(logRes.data)) {
+            deployLogs = logRes.data.map((l: any) => ({
+              timestamp: l.timestamp || new Date().toISOString(),
+              message: l.message || l.log || JSON.stringify(l),
+              level: l.level || "info",
+            }));
+          }
+        }
+      }
+
+      // Fetch service details
+      const svcRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}`, { headers });
+      const serviceInfo = svcRes.ok ? {
+        id: serviceId,
+        name: svcRes.data?.name || svcRes.data?.service?.name,
+        status: svcRes.data?.suspended || svcRes.data?.service?.suspended ? "suspended" : "active",
+        type: svcRes.data?.type || svcRes.data?.service?.type || "web_service",
+        runtime: svcRes.data?.serviceDetails?.runtime || svcRes.data?.service?.serviceDetails?.runtime,
+        plan: svcRes.data?.serviceDetails?.plan || svcRes.data?.service?.serviceDetails?.plan,
+        region: svcRes.data?.serviceDetails?.region || svcRes.data?.service?.serviceDetails?.region,
+        createdAt: svcRes.data?.createdAt || svcRes.data?.service?.createdAt,
+        updatedAt: svcRes.data?.updatedAt || svcRes.data?.service?.updatedAt,
+      } : null;
+
+      // Fetch env vars (keys only, no values for security)
+      const envRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/env-vars`, { headers });
+      const envKeys = envRes.ok && Array.isArray(envRes.data)
+        ? envRes.data.map((e: any) => ({ key: e.envVar?.key || e.key, hasValue: true }))
+        : [];
+
+      return json({
+        success: true,
+        logs: deployLogs,
+        serviceInfo,
+        envKeys,
+        latestDeployStatus: deploysRes.ok && deploysRes.data?.[0]
+          ? (deploysRes.data[0]?.deploy?.status || deploysRes.data[0]?.status)
+          : null,
+      });
+    }
+
+    // ── Fetch service health/metrics ──
+    if (action === "fetch-health") {
+      const { deploymentId: depId } = body;
+      if (!depId) throw new Error("Missing deploymentId");
+
+      const { data: dep, error: depErr } = await supabase
+        .from("deployments")
+        .select("*, cloud_connections(*)")
+        .eq("id", depId)
+        .single();
+      if (depErr || !dep) throw new Error("Deployment not found");
+
+      const connection = (dep as any).cloud_connections;
+      if (!connection) throw new Error("Connection not found");
+
+      const token = connection.token;
+      const RENDER_API = "https://api.render.com/v1";
+      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+      let serviceId = dep.deploy_id;
+      if (!serviceId && dep.live_url) {
+        const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers });
+        if (listRes.ok && Array.isArray(listRes.data) && listRes.data.length > 0) {
+          serviceId = listRes.data[0].service?.id;
+        }
+      }
+      if (!serviceId) throw new Error("Could not find Render service ID");
+
+      // Health check via HTTP
+      let healthCheck = { reachable: false, statusCode: 0, responseTime: 0, error: "" };
+      if (dep.live_url) {
+        const start = Date.now();
+        try {
+          const hRes = await fetch(dep.live_url, { signal: AbortSignal.timeout(15000) });
+          healthCheck = {
+            reachable: hRes.ok,
+            statusCode: hRes.status,
+            responseTime: Date.now() - start,
+            error: hRes.ok ? "" : `HTTP ${hRes.status}`,
+          };
+        } catch (e: any) {
+          healthCheck = {
+            reachable: false,
+            statusCode: 0,
+            responseTime: Date.now() - start,
+            error: e.message || "Connection failed",
+          };
+        }
+      }
+
+      // Fetch last 5 deploys for history
+      const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=5`, { headers });
+      const deployHistory = deploysRes.ok && Array.isArray(deploysRes.data)
+        ? deploysRes.data.map((d: any) => {
+            const deploy = d.deploy || d;
+            return {
+              id: deploy.id,
+              status: deploy.status,
+              createdAt: deploy.createdAt,
+              finishedAt: deploy.finishedAt,
+              commit: deploy.commit?.message?.slice(0, 80) || "",
+            };
+          })
+        : [];
+
+      return json({
+        success: true,
+        healthCheck,
+        deployHistory,
+        serviceId,
+      });
+    }
+
     // ── Delete deployment ──
     if (action === "delete") {
       const { deploymentId: delId } = body;
