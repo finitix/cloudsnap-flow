@@ -841,7 +841,7 @@ serve(async (req) => {
     if (provider === "vercel") {
       result = await deployToVercel(token, desiredSubdomain, extractedFiles, needsBuild, project.build_command, project.output_dir, project.framework, appendLog);
     } else if (provider === "render") {
-      result = await deployToRender(token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars);
+      result = await deployToRender(token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars, customStartCommand, customBuildCommand);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
