@@ -759,7 +759,7 @@ serve(async (req) => {
     // ── Deploy ──
     // ══════════════════════════════════════
     deploymentId = body.deploymentId;
-    const { projectId, connectionId, customDomain, envVars } = body;
+    const { projectId, connectionId, customDomain, envVars, customStartCommand, customBuildCommand } = body;
 
     if (!deploymentId || !projectId || !connectionId) {
       throw new Error(`Missing: deploymentId=${deploymentId}, projectId=${projectId}, connectionId=${connectionId}`);

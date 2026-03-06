@@ -6,10 +6,11 @@ import DashboardLayout from "@/components/DashboardLayout";
 import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2 } from "lucide-react";
+import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
@@ -28,6 +29,11 @@ export default function ProjectDetail() {
   const [checkingDomain, setCheckingDomain] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
+  const [customStartCommand, setCustomStartCommand] = useState("");
+  const [customBuildCommand, setCustomBuildCommand] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,7 +60,6 @@ export default function ProjectDetail() {
       setConnections(conns);
       setDeployments(dRes.data || []);
 
-      // Auto-select appropriate connection based on project type
       const proj = pRes.data;
       if (proj && conns.length > 0) {
         const isBackend = proj.project_type === "backend" || proj.project_type === "fullstack";
@@ -172,6 +177,8 @@ export default function ProjectDetail() {
           connectionId: conn.id,
           customDomain: fullDomain,
           envVars: conn.provider === "render" && envVars.length > 0 ? envVars.filter((e) => e.key && e.value) : undefined,
+          customStartCommand: customStartCommand.trim() || undefined,
+          customBuildCommand: customBuildCommand.trim() || undefined,
         },
       });
       if (fnError) {
@@ -221,7 +228,6 @@ export default function ProjectDetail() {
     }
   };
 
-
   const handleDeleteProject = async () => {
     if (!project || !user) return;
     setDeletingProject(true);
@@ -258,6 +264,22 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleRenameProject = async () => {
+    if (!newProjectName.trim() || !project) return;
+    setRenaming(true);
+    try {
+      const { error } = await supabase.from("projects").update({ name: newProjectName.trim() }).eq("id", project.id);
+      if (error) throw error;
+      setProject({ ...project, name: newProjectName.trim() });
+      setShowRenameDialog(false);
+      toast.success("Project renamed!");
+    } catch (err: any) {
+      toast.error("Rename failed: " + err.message);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   if (!project) return <DashboardLayout><div className="p-8 text-muted-foreground">Loading...</div></DashboardLayout>;
 
   const conn = getConn();
@@ -272,6 +294,9 @@ export default function ProjectDetail() {
           <div>
             <div className="flex items-center gap-3 mb-1">
               <h1 className="text-2xl font-bold">{project.name}</h1>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setNewProjectName(project.name); setShowRenameDialog(true); }}>
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
               <StatusBadge status={project.status} />
             </div>
             <p className="text-sm text-muted-foreground">
@@ -321,7 +346,6 @@ export default function ProjectDetail() {
             ))}
           </div>
 
-          {/* How to run / deploy guidance */}
           <div className="mt-4 bg-muted/30 rounded-lg p-4 border border-border/50">
             <h4 className="text-sm font-semibold mb-2">📋 How to Deploy</h4>
             {project.project_type === "backend" ? (
@@ -330,6 +354,7 @@ export default function ProjectDetail() {
                 <p>• Render will auto-detect your runtime ({project.framework || "Node.js"})</p>
                 <p>• Your app will be live at <code className="bg-muted px-1 rounded">your-name.onrender.com</code></p>
                 <p>• Make sure your server listens on <code className="bg-muted px-1 rounded">$PORT</code> (Render injects it)</p>
+                <p>• ⚠️ Free Render services spin down after inactivity — first request may take ~50s</p>
               </div>
             ) : project.project_type === "fullstack" ? (
               <div className="text-xs text-muted-foreground space-y-1">
@@ -389,6 +414,36 @@ export default function ProjectDetail() {
               💡 You have both frontend (Vercel) and backend (Render) connections. Select the appropriate one for your deployment target.
             </p>
           )}
+
+          {/* Custom Commands */}
+          <div className="mt-4 border-t border-border pt-4">
+            <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Terminal className="h-3.5 w-3.5 text-primary" /> Custom Commands (optional)
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Build Command</Label>
+                <Input
+                  value={customBuildCommand}
+                  onChange={(e) => setCustomBuildCommand(e.target.value)}
+                  placeholder={project.build_command || "npm install"}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Start Command</Label>
+                <Input
+                  value={customStartCommand}
+                  onChange={(e) => setCustomStartCommand(e.target.value)}
+                  placeholder={project.framework === "Python" ? "python main.py" : project.framework === "Go" ? "./main" : "node server.js"}
+                  className="font-mono text-xs"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Leave blank to use auto-detected defaults. For Node.js the default start command is <code className="bg-muted px-1 rounded">node server.js</code> or <code className="bg-muted px-1 rounded">npm start</code> if a start script exists.
+            </p>
+          </div>
 
           {/* Environment Variables (Render only) */}
           {conn?.provider === "render" && (
@@ -508,6 +563,11 @@ export default function ProjectDetail() {
                       </Button>
                     </div>
                   </div>
+                  {d.status === "live" && d.provider === "render" && (
+                    <div className="bg-warning/10 text-warning text-xs rounded-lg p-2">
+                      ⚠️ Free Render services spin down after ~15min of inactivity. First request after idle may take 50+ seconds. If you see "ERR_BLOCKED_BY_RESPONSE", wait a moment and refresh.
+                    </div>
+                  )}
                   {(d.status === "live" || d.cpu_usage != null) && (
                     <div className="flex gap-4">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -580,6 +640,25 @@ export default function ProjectDetail() {
             <Button variant="outline" onClick={() => setShowDomainDialog(false)}>Cancel</Button>
             <Button onClick={handleDeploy} disabled={deploying || !projectSubdomain || domainAvailable === false}>
               <Rocket className="h-4 w-4 mr-2" /> Deploy
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Dialog */}
+      <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label>New Name</Label>
+            <Input value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="my-project" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRenameDialog(false)}>Cancel</Button>
+            <Button onClick={handleRenameProject} disabled={renaming || !newProjectName.trim()}>
+              {renaming ? "Renaming..." : "Rename"}
             </Button>
           </DialogFooter>
         </DialogContent>
