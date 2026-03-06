@@ -361,6 +361,10 @@ async function deployToRender(
       }
     }
 
+    // Override with user-provided commands if specified
+    if (userStartCommand) startCommand = userStartCommand;
+    if (userBuildCommand) buildCommand = userBuildCommand;
+
     await appendLog(`Detected runtime: ${runtime} | build: ${buildCommand} | start: ${startCommand}`);
 
     if (!githubUrl) {
