@@ -509,6 +509,55 @@ serve(async (req) => {
       return json({ success: true });
     }
 
+    // ── Analyze project (real analysis) ──
+    if (action === "analyze") {
+      const { projectId: analyzeProjectId } = body;
+      if (!analyzeProjectId) throw new Error("Missing projectId");
+
+      const { data: proj, error: projErr } = await supabase.from("projects").select("*").eq("id", analyzeProjectId).single();
+      if (projErr || !proj) throw new Error("Project not found");
+
+      let extractedFiles: ExtractedFile[] = [];
+
+      if (proj.source_type === "github" && proj.github_url) {
+        const zipBuffer = await downloadGitHubRepoZip(proj.github_url);
+        extractedFiles = extractZipFilesRaw(zipBuffer);
+      } else if (proj.source_type === "zip") {
+        const { data: fileList } = await supabase.storage
+          .from("project-uploads")
+          .list(proj.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
+        if (fileList && fileList.length > 0) {
+          const filePath = `${proj.user_id}/${fileList[0].name}`;
+          const { data: fileData } = await supabase.storage.from("project-uploads").download(filePath);
+          if (fileData) {
+            const zipBuffer = await fileData.arrayBuffer();
+            extractedFiles = extractZipFilesRaw(zipBuffer);
+          }
+        }
+      }
+
+      if (extractedFiles.length === 0) {
+        // Fallback
+        await supabase.from("projects").update({ status: "ready", framework: "Unknown", project_type: "frontend" }).eq("id", analyzeProjectId);
+        return json({ success: true, projectType: "frontend" });
+      }
+
+      const analysis = detectProjectType(extractedFiles);
+      let projectType = "frontend";
+      if (analysis.hasBackend && analysis.hasFrontend) projectType = "fullstack";
+      else if (analysis.hasBackend && !analysis.hasFrontend) projectType = "backend";
+
+      await supabase.from("projects").update({
+        status: "ready",
+        framework: analysis.framework,
+        project_type: projectType,
+        build_command: analysis.buildCommand || "npm run build",
+        output_dir: analysis.outputDir || "dist",
+      }).eq("id", analyzeProjectId);
+
+      return json({ success: true, projectType, framework: analysis.framework, hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend });
+    }
+
     // ── Check project-name availability ──
     if (action === "check-name") {
       const { name, provider, token } = body;
