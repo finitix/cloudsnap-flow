@@ -555,25 +555,19 @@ export default function ProjectDetail() {
                         <RefreshCw className="h-3 w-3 animate-spin text-primary" />
                       )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {d.status === "live" && d.provider === "render" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleUpdateEnvVars(d.id)}
-                          className="text-xs"
-                        >
-                          <Settings2 className="h-3 w-3 mr-1" />Update Env Vars
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleUpdateEnvVars(d.id)} className="text-xs">
+                            <Settings2 className="h-3 w-3 mr-1" />Update Env Vars
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleFetchLogs(d.id)} disabled={fetchingLogs === d.id} className="text-xs">
+                            {fetchingLogs === d.id ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Fetching...</> : <><ScrollText className="h-3 w-3 mr-1" />Fetch Logs</>}
+                          </Button>
+                        </>
                       )}
                       {d.status === "live" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRedeploy(d.id)}
-                          disabled={redeploying === d.id}
-                          className="text-xs"
-                        >
+                        <Button variant="outline" size="sm" onClick={() => handleRedeploy(d.id)} disabled={redeploying === d.id} className="text-xs">
                           {redeploying === d.id ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Redeploying...</> : <><RefreshCw className="h-3 w-3 mr-1" />Redeploy</>}
                         </Button>
                       )}
