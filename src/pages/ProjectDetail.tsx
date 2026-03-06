@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2, Pencil } from "lucide-react";
+import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2, Pencil, ScrollText } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
@@ -34,6 +34,8 @@ export default function ProjectDetail() {
   const [renaming, setRenaming] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [renderLogs, setRenderLogs] = useState<Record<string, string[]>>({});
+  const [fetchingLogs, setFetchingLogs] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -261,6 +263,29 @@ export default function ProjectDetail() {
       toast.success("Environment variables updated!");
     } catch (err: any) {
       toast.error("Failed to update env vars: " + err.message);
+    }
+  };
+
+  const handleFetchLogs = async (depId: string) => {
+    setFetchingLogs(depId);
+    try {
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "fetch-logs", deploymentId: depId },
+      });
+      if (error) throw error;
+      if (data?.success && data.logs) {
+        setRenderLogs((prev) => ({
+          ...prev,
+          [depId]: data.logs.map((l: any) => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.level}] ${l.message}`),
+        }));
+        toast.success(`Fetched ${data.logs.length} log entries`);
+      } else {
+        setRenderLogs((prev) => ({ ...prev, [depId]: ["No logs available from provider."] }));
+      }
+    } catch (err: any) {
+      toast.error("Failed to fetch logs: " + err.message);
+    } finally {
+      setFetchingLogs(null);
     }
   };
 
@@ -530,25 +555,19 @@ export default function ProjectDetail() {
                         <RefreshCw className="h-3 w-3 animate-spin text-primary" />
                       )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {d.status === "live" && d.provider === "render" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleUpdateEnvVars(d.id)}
-                          className="text-xs"
-                        >
-                          <Settings2 className="h-3 w-3 mr-1" />Update Env Vars
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleUpdateEnvVars(d.id)} className="text-xs">
+                            <Settings2 className="h-3 w-3 mr-1" />Update Env Vars
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleFetchLogs(d.id)} disabled={fetchingLogs === d.id} className="text-xs">
+                            {fetchingLogs === d.id ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Fetching...</> : <><ScrollText className="h-3 w-3 mr-1" />Fetch Logs</>}
+                          </Button>
+                        </>
                       )}
                       {d.status === "live" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRedeploy(d.id)}
-                          disabled={redeploying === d.id}
-                          className="text-xs"
-                        >
+                        <Button variant="outline" size="sm" onClick={() => handleRedeploy(d.id)} disabled={redeploying === d.id} className="text-xs">
                           {redeploying === d.id ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Redeploying...</> : <><RefreshCw className="h-3 w-3 mr-1" />Redeploy</>}
                         </Button>
                       )}
@@ -583,6 +602,14 @@ export default function ProjectDetail() {
                   )}
                   {d.logs && (
                     <pre className="bg-muted/50 text-xs rounded-lg p-3 font-mono max-h-64 overflow-auto text-muted-foreground whitespace-pre-wrap">{d.logs}</pre>
+                  )}
+                  {renderLogs[d.id] && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold flex items-center gap-1"><ScrollText className="h-3 w-3 text-primary" /> Provider Logs</p>
+                      <pre className="bg-background/80 text-xs rounded-lg p-3 font-mono max-h-64 overflow-auto text-muted-foreground whitespace-pre-wrap border border-border/50">
+                        {renderLogs[d.id].join("\n")}
+                      </pre>
+                    </div>
                   )}
                 </div>
               ))}
