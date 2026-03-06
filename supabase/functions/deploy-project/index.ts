@@ -366,10 +366,10 @@ async function deployToRender(
         runtime,
         plan: "free",
         region: "oregon",
-        ...(runtime !== "docker" ? {
+        envSpecificDetails: runtime !== "docker" ? {
           buildCommand,
           startCommand,
-        } : {}),
+        } : {},
       },
     };
 
