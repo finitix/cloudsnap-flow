@@ -329,6 +329,7 @@ async function deployToRender(
     const hasGo = files.some((f) => f.path === "go.mod");
     const hasRuby = files.some((f) => f.path === "Gemfile");
     const hasDocker = files.some((f) => f.path === "Dockerfile");
+    const hasServerJs = files.some((f) => f.path === "server.js" || f.path === "server.ts" || f.path === "app.js" || f.path === "app.ts" || f.path === "index.js" || f.path === "index.ts");
 
     if (hasPython) {
       runtime = "python";
@@ -340,6 +341,22 @@ async function deployToRender(
       runtime = "ruby"; startCommand = "bundle exec rails server -p $PORT"; buildCommand = "bundle install";
     } else if (hasDocker) {
       runtime = "docker"; startCommand = ""; buildCommand = "";
+    } else if (hasServerJs) {
+      // Detect the exact entry file for start command
+      const entryFile = ["server.js", "server.ts", "app.js", "app.ts", "index.js", "index.ts"]
+        .find((f) => files.some((file) => file.path === f)) || "server.js";
+      startCommand = `node ${entryFile}`;
+      buildCommand = "npm install";
+
+      // Check package.json for a start script
+      const pkgFile = files.find((f) => f.path === "package.json");
+      if (pkgFile) {
+        try {
+          const pkg = JSON.parse(new TextDecoder().decode(pkgFile.data));
+          if (pkg.scripts?.start) startCommand = "npm start";
+          if (pkg.scripts?.build) buildCommand = "npm install && npm run build";
+        } catch {}
+      }
     }
 
     await appendLog(`Detected runtime: ${runtime}`);
