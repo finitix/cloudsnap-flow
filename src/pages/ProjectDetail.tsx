@@ -266,9 +266,6 @@ export default function ProjectDetail() {
     }
   };
 
-  const [renderLogs, setRenderLogs] = useState<Record<string, string[]>>({});
-  const [fetchingLogs, setFetchingLogs] = useState<string | null>(null);
-
   const handleFetchLogs = async (depId: string) => {
     setFetchingLogs(depId);
     try {
