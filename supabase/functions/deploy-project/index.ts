@@ -391,13 +391,13 @@ async function deployToRender(
         plan: "free",
         region: "oregon",
         ...(runtime !== "docker" ? { buildCommand, startCommand } : {}),
+        envSpecificDetails: {
+          envVars: envVars && envVars.length > 0
+            ? envVars.map((e: any) => ({ key: e.key, value: e.value }))
+            : [],
+        },
       },
     };
-
-    // Add environment variables if provided
-    if (envVars && envVars.length > 0) {
-      createPayload.envVars = envVars.map((e) => ({ key: e.key, value: e.value }));
-    }
 
     await appendLog(`Creating Render service from GitHub: ${repoUrl}...`);
     let createRes = await fetch(`${RENDER_API}/services`, {
