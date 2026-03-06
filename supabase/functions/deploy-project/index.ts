@@ -800,7 +800,7 @@ serve(async (req) => {
       );
     } else if (provider === "render") {
       result = await deployToRender(
-        token, desiredSubdomain, project.github_url, extractedFiles, appendLog
+        token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars
       );
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
