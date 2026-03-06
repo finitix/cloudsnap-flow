@@ -14,6 +14,25 @@ const json = (data: any, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
+// Safe JSON fetch — handles non-JSON responses gracefully
+async function safeFetchJson(url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any }> {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get("content-type") || "";
+  let data: any;
+  if (contentType.includes("application/json")) {
+    try {
+      data = await res.json();
+    } catch {
+      const text = await res.text();
+      data = { _rawText: text || "(empty response)" };
+    }
+  } else {
+    const text = await res.text();
+    data = { _rawText: text || "(empty response)" };
+  }
+  return { ok: res.ok, status: res.status, data };
+}
+
 async function sha256Hex(data: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", data);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -62,57 +81,36 @@ function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasB
   const hasFrontend = hasIndexHtml || hasTsx || hasVue || hasViteConfig;
   const hasBackend = hasPython || hasGo || hasRuby || hasDocker || hasProcfile || hasServerFile || hasNextConfig;
 
-  // Detect framework
   let framework = "Unknown";
   let buildCommand = "npm run build";
   let outputDir = "dist";
   let startCommand = "npm start";
 
   if (hasNextConfig) {
-    framework = "Next.js";
-    buildCommand = "npm run build";
-    outputDir = ".next";
-    startCommand = "npm start";
+    framework = "Next.js"; buildCommand = "npm run build"; outputDir = ".next"; startCommand = "npm start";
   } else if (hasViteConfig && hasTsx) {
-    framework = "React";
-    buildCommand = "npm run build";
-    outputDir = "dist";
+    framework = "React"; buildCommand = "npm run build"; outputDir = "dist";
   } else if (hasVue) {
-    framework = "Vue";
-    buildCommand = "npm run build";
-    outputDir = "dist";
+    framework = "Vue"; buildCommand = "npm run build"; outputDir = "dist";
   } else if (hasTsx) {
     framework = "React";
   } else if (hasPython) {
-    framework = "Python";
-    buildCommand = "pip install -r requirements.txt";
-    outputDir = "";
+    framework = "Python"; buildCommand = "pip install -r requirements.txt"; outputDir = "";
     startCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
   } else if (hasGo) {
-    framework = "Go";
-    buildCommand = "go build -o main .";
-    startCommand = "./main";
+    framework = "Go"; buildCommand = "go build -o main ."; startCommand = "./main";
   } else if (hasRuby) {
-    framework = "Ruby";
-    buildCommand = "bundle install";
-    startCommand = "bundle exec rails server -p $PORT";
+    framework = "Ruby"; buildCommand = "bundle install"; startCommand = "bundle exec rails server -p $PORT";
   } else if (hasDocker) {
-    framework = "Docker";
-    buildCommand = "";
-    startCommand = "";
+    framework = "Docker"; buildCommand = ""; startCommand = "";
   } else if (hasServerFile) {
-    framework = "Node.js";
-    buildCommand = "npm install";
-    startCommand = "node server.js";
+    framework = "Node.js"; buildCommand = "npm install"; startCommand = "node server.js";
   } else if (hasPackageJson) {
     framework = "Node.js";
   } else if (hasIndexHtml) {
-    framework = "Static HTML";
-    buildCommand = "";
-    outputDir = ".";
+    framework = "Static HTML"; buildCommand = ""; outputDir = ".";
   }
 
-  // Also try to read package.json for more info
   const pkgFile = files.find((f) => f.path === "package.json");
   if (pkgFile) {
     try {
@@ -147,35 +145,28 @@ async function downloadGitHubRepoZip(githubUrl: string): Promise<ArrayBuffer> {
   return await res.arrayBuffer();
 }
 
-// ── Vercel: Upload files individually then create deployment ──
+// ── Vercel deploy ──
 async function deployToVercel(
-  token: string,
-  projectName: string,
-  files: ExtractedFile[],
-  needsBuild: boolean,
-  buildCommand: string | null,
-  outputDir: string | null,
-  framework: string | null,
+  token: string, projectName: string, files: ExtractedFile[], needsBuild: boolean,
+  buildCommand: string | null, outputDir: string | null, framework: string | null,
   appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>
 ): Promise<{ deployId: string; liveUrl: string }> {
   await appendLog("Checking Vercel project...");
-  const checkRes = await fetch(`https://api.vercel.com/v9/projects/${projectName}`, {
+  const checkRes = await safeFetchJson(`https://api.vercel.com/v9/projects/${projectName}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const exists = checkRes.status !== 404;
-  await checkRes.text();
   await appendLog(exists ? `"${projectName}" exists — deploying to it.` : `"${projectName}" is new.`);
 
   if (!exists) {
     await appendLog(`Creating Vercel project "${projectName}"...`);
-    const createRes = await fetch("https://api.vercel.com/v10/projects", {
+    const createRes = await safeFetchJson("https://api.vercel.com/v10/projects", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ name: projectName }),
     });
-    const createData = await createRes.json();
-    if (!createRes.ok && createData?.error?.code !== "project_already_exists") {
-      await appendLog(`Project create warning: ${JSON.stringify(createData)}`);
+    if (!createRes.ok && createRes.data?.error?.code !== "project_already_exists") {
+      await appendLog(`Project create warning: ${JSON.stringify(createRes.data)}`);
     } else {
       await appendLog(`Vercel project "${projectName}" created ✓`);
     }
@@ -215,48 +206,42 @@ async function deployToVercel(
   await appendLog(`All ${files.length} files uploaded ✓`);
 
   const deployPayload: any = {
-    name: projectName,
-    project: projectName,
-    files: fileEntries,
-    target: "production",
+    name: projectName, project: projectName, files: fileEntries, target: "production",
   };
 
   if (needsBuild) {
     deployPayload.projectSettings = {
       buildCommand: buildCommand || "npm run build",
       outputDirectory: outputDir || "dist",
-      framework: framework?.toLowerCase() === "react" ? "vite"
-        : framework?.toLowerCase() === "next.js" ? "nextjs"
-        : null,
+      framework: framework?.toLowerCase() === "react" ? "vite" : framework?.toLowerCase() === "next.js" ? "nextjs" : null,
       installCommand: "npm install --legacy-peer-deps",
     };
   }
 
   await appendLog("Creating Vercel deployment...");
-  const dr = await fetch("https://api.vercel.com/v13/deployments", {
+  let dr = await safeFetchJson("https://api.vercel.com/v13/deployments", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(deployPayload),
   });
 
-  let dd = await dr.json();
   if (!dr.ok) {
-    await appendLog(`Deploy error: ${JSON.stringify(dd)}`);
+    await appendLog(`Deploy error: ${JSON.stringify(dr.data)}`);
     if (needsBuild) {
       await appendLog("Build setup failed — retrying as static deployment...");
       delete deployPayload.projectSettings;
-      const retryRes = await fetch("https://api.vercel.com/v13/deployments", {
+      dr = await safeFetchJson("https://api.vercel.com/v13/deployments", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(deployPayload),
       });
-      dd = await retryRes.json();
-      if (!retryRes.ok) throw new Error(`Static deploy also failed: ${JSON.stringify(dd)}`);
+      if (!dr.ok) throw new Error(`Static deploy also failed: ${JSON.stringify(dr.data)}`);
     } else {
-      throw new Error(`Deploy failed: ${JSON.stringify(dd)}`);
+      throw new Error(`Deploy failed: ${JSON.stringify(dr.data)}`);
     }
   }
 
+  const dd = dr.data;
   const deployId = dd.id;
   let liveUrl = `https://${dd.url}`;
   await appendLog(`Deployment ${deployId} created`);
@@ -264,10 +249,10 @@ async function deployToVercel(
   let attempts = 0;
   while (attempts < 60) {
     await new Promise((r) => setTimeout(r, 5000));
-    const sr = await fetch(`https://api.vercel.com/v13/deployments/${deployId}`, {
+    const sr = await safeFetchJson(`https://api.vercel.com/v13/deployments/${deployId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const sd = await sr.json();
+    const sd = sr.data;
     await appendLog(`Build: ${sd.readyState}`);
     if (sd.readyState === "READY") {
       liveUrl = `https://${projectName}.vercel.app`;
@@ -283,12 +268,9 @@ async function deployToVercel(
   return { deployId, liveUrl };
 }
 
-// ── Render: Create/update web service and deploy ──
+// ── Render deploy ──
 async function deployToRender(
-  token: string,
-  serviceName: string,
-  githubUrl: string | null,
-  files: ExtractedFile[],
+  token: string, serviceName: string, githubUrl: string | null, files: ExtractedFile[],
   appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>,
   envVars?: Array<{ key: string; value: string }>
 ): Promise<{ deployId: string; liveUrl: string }> {
@@ -298,26 +280,25 @@ async function deployToRender(
     "Content-Type": "application/json",
   };
 
-  // Fetch owner ID from Render API
+  // Fetch owner ID
   await appendLog("Fetching Render account info...");
-  const ownerRes = await fetch(`${RENDER_API}/owners`, { headers });
-  const ownerData = await ownerRes.json();
-  if (!ownerRes.ok || !ownerData || ownerData.length === 0) {
+  const ownerRes = await safeFetchJson(`${RENDER_API}/owners`, { headers });
+  if (!ownerRes.ok || !ownerRes.data || ownerRes.data.length === 0) {
     throw new Error("Failed to fetch Render owner info. Check your API token.");
   }
-  const ownerId = ownerData[0]?.owner?.id || ownerData[0]?.id;
+  const ownerId = ownerRes.data[0]?.owner?.id || ownerRes.data[0]?.id;
   if (!ownerId) throw new Error("Could not determine Render owner ID");
   await appendLog(`Render owner: ${ownerId}`);
 
   // Check for existing service
   await appendLog("Checking existing Render services...");
-  const listRes = await fetch(`${RENDER_API}/services?name=${encodeURIComponent(serviceName)}&limit=1`, { headers });
-  const listData = await listRes.json();
+  const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(serviceName)}&limit=1`, { headers });
+  const listData = listRes.data;
 
   let serviceId = "";
   let serviceUrl = "";
 
-  if (listData && listData.length > 0 && listData[0]?.service) {
+  if (listData && Array.isArray(listData) && listData.length > 0 && listData[0]?.service) {
     serviceId = listData[0].service.id;
     serviceUrl = `https://${listData[0].service.serviceDetails?.url || serviceName + ".onrender.com"}`;
     await appendLog(`Found existing service: ${serviceId}`);
@@ -325,7 +306,7 @@ async function deployToRender(
     // Update env vars on existing service if provided
     if (envVars && envVars.length > 0) {
       await appendLog(`Updating ${envVars.length} environment variables...`);
-      const envRes = await fetch(`${RENDER_API}/services/${serviceId}/env-vars`, {
+      const envRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/env-vars`, {
         method: "PUT",
         headers,
         body: JSON.stringify(envVars.map((e) => ({ key: e.key, value: e.value }))),
@@ -333,8 +314,7 @@ async function deployToRender(
       if (envRes.ok) {
         await appendLog("Environment variables updated ✓");
       } else {
-        const envErr = await envRes.text();
-        await appendLog(`Env vars update warning: ${envErr}`);
+        await appendLog(`Env vars update warning: ${JSON.stringify(envRes.data)}`);
       }
     }
   }
@@ -343,7 +323,7 @@ async function deployToRender(
     // Detect runtime from files
     let runtime = "node";
     let startCommand = "npm start";
-    let buildCommand = "npm install && npm run build";
+    let buildCommand = "npm install";
 
     const hasPython = files.some((f) => f.path === "requirements.txt" || f.path === "main.py" || f.path === "app.py");
     const hasGo = files.some((f) => f.path === "go.mod");
@@ -355,15 +335,11 @@ async function deployToRender(
       startCommand = files.some((f) => f.path === "manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
       buildCommand = "pip install -r requirements.txt";
     } else if (hasGo) {
-      runtime = "go";
-      startCommand = "./main";
-      buildCommand = "go build -o main .";
+      runtime = "go"; startCommand = "./main"; buildCommand = "go build -o main .";
     } else if (hasRuby) {
-      runtime = "ruby";
-      startCommand = "bundle exec rails server -p $PORT";
-      buildCommand = "bundle install";
+      runtime = "ruby"; startCommand = "bundle exec rails server -p $PORT"; buildCommand = "bundle install";
     } else if (hasDocker) {
-      runtime = "docker";
+      runtime = "docker"; startCommand = ""; buildCommand = "";
     }
 
     await appendLog(`Detected runtime: ${runtime}`);
@@ -376,7 +352,7 @@ async function deployToRender(
     if (!match) throw new Error("Invalid GitHub URL for Render");
     const repoUrl = `https://github.com/${match[1]}/${match[2].replace(/\.git$/, "")}`;
 
-    // Build the correct Render API payload
+    // Correct Render API v1 payload structure:
     // Top-level: type, name, ownerId, repo, autoDeploy, branch, envVars
     // serviceDetails (webServiceDetailsPOST): runtime, plan, region, buildCommand, startCommand
     const createPayload: any = {
@@ -390,49 +366,49 @@ async function deployToRender(
         runtime,
         plan: "free",
         region: "oregon",
-        envSpecificDetails: {
-          buildCommand: runtime !== "docker" ? buildCommand : undefined,
-          startCommand: runtime !== "docker" ? startCommand : undefined,
-          envVars: envVars && envVars.length > 0
-            ? envVars.map((e: any) => ({ key: e.key, value: e.value }))
-            : [],
-        },
+        ...(runtime !== "docker" ? {
+          buildCommand,
+          startCommand,
+        } : {}),
       },
     };
 
+    // Environment variables go at the TOP LEVEL per Render API docs
+    if (envVars && envVars.length > 0) {
+      createPayload.envVars = envVars.map((e: any) => ({ key: e.key, value: e.value }));
+    }
+
     await appendLog(`Creating Render service from GitHub: ${repoUrl}...`);
-    let createRes = await fetch(`${RENDER_API}/services`, {
+    let createRes = await safeFetchJson(`${RENDER_API}/services`, {
       method: "POST",
       headers,
       body: JSON.stringify(createPayload),
     });
 
-    let createData = await createRes.json();
     if (!createRes.ok) {
       // Try master branch if main fails
-      if (JSON.stringify(createData).toLowerCase().includes("branch")) {
+      if (JSON.stringify(createRes.data).toLowerCase().includes("branch")) {
         await appendLog("main branch not found, trying master...");
         createPayload.branch = "master";
-        createRes = await fetch(`${RENDER_API}/services`, {
+        createRes = await safeFetchJson(`${RENDER_API}/services`, {
           method: "POST",
           headers,
           body: JSON.stringify(createPayload),
         });
-        createData = await createRes.json();
-        if (!createRes.ok) throw new Error(`Render create failed: ${JSON.stringify(createData)}`);
+        if (!createRes.ok) throw new Error(`Render create failed: ${JSON.stringify(createRes.data)}`);
       } else {
-        throw new Error(`Render create failed: ${JSON.stringify(createData)}`);
+        throw new Error(`Render create failed: ${JSON.stringify(createRes.data)}`);
       }
     }
 
-    serviceId = createData.service?.id || createData.id;
+    serviceId = createRes.data.service?.id || createRes.data.id;
     serviceUrl = `https://${serviceName}.onrender.com`;
     await appendLog(`Render service created: ${serviceId} ✓`);
   }
 
   // Trigger a deploy
   await appendLog("Triggering Render deploy...", { status: "deploying" });
-  const deployRes = await fetch(`${RENDER_API}/services/${serviceId}/deploys`, {
+  const deployRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys`, {
     method: "POST",
     headers,
     body: JSON.stringify({ clearCache: "do_not_clear" }),
@@ -440,12 +416,10 @@ async function deployToRender(
 
   let deployId = "";
   if (deployRes.ok) {
-    const deployData = await deployRes.json();
-    deployId = deployData.id || deployData.deploy?.id || serviceId;
+    deployId = deployRes.data.id || deployRes.data.deploy?.id || serviceId;
     await appendLog(`Deploy triggered: ${deployId}`);
   } else {
-    const errText = await deployRes.text();
-    await appendLog(`Deploy trigger note: ${errText} (service will auto-deploy from GitHub)`);
+    await appendLog(`Deploy trigger note: ${JSON.stringify(deployRes.data)} (service will auto-deploy from GitHub)`);
     deployId = serviceId;
   }
 
@@ -454,23 +428,18 @@ async function deployToRender(
   while (attempts < 60) {
     await new Promise((r) => setTimeout(r, 10000));
     try {
-      const statusRes = await fetch(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
-      if (statusRes.ok) {
-        const deploys = await statusRes.json();
-        if (deploys && deploys.length > 0) {
-          const latest = deploys[0]?.deploy || deploys[0];
-          const status = latest.status;
-          await appendLog(`Render build: ${status}`);
-          if (status === "live") {
-            await appendLog(`Live ✓ → ${serviceUrl}`);
-            break;
-          }
-          if (status === "deactivated" || status === "build_failed" || status === "update_failed" || status === "canceled") {
-            throw new Error(`Render deploy failed: ${status}`);
-          }
+      const statusRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
+      if (statusRes.ok && Array.isArray(statusRes.data) && statusRes.data.length > 0) {
+        const latest = statusRes.data[0]?.deploy || statusRes.data[0];
+        const status = latest.status;
+        await appendLog(`Render build: ${status}`);
+        if (status === "live") {
+          await appendLog(`Live ✓ → ${serviceUrl}`);
+          break;
         }
-      } else {
-        await statusRes.text();
+        if (status === "deactivated" || status === "build_failed" || status === "update_failed" || status === "canceled") {
+          throw new Error(`Render deploy failed: ${status}`);
+        }
       }
     } catch (e: any) {
       if (e.message.includes("Render deploy failed")) throw e;
@@ -520,7 +489,77 @@ serve(async (req) => {
       return json({ success: true });
     }
 
-    // ── Analyze project (real analysis) ──
+    // ── Delete project completely ──
+    if (action === "delete-project") {
+      const { projectId, userId } = body;
+      if (!projectId) throw new Error("Missing projectId");
+
+      // 1. Delete all deployments for this project
+      await supabase.from("deployments").delete().eq("project_id", projectId);
+
+      // 2. Delete storage files
+      if (userId) {
+        const { data: storageFiles } = await supabase.storage.from("project-uploads").list(userId);
+        if (storageFiles && storageFiles.length > 0) {
+          const paths = storageFiles.map((f: any) => `${userId}/${f.name}`);
+          await supabase.storage.from("project-uploads").remove(paths);
+        }
+      }
+
+      // 3. Delete the project record
+      const { error } = await supabase.from("projects").delete().eq("id", projectId);
+      if (error) throw new Error(`Delete project failed: ${error.message}`);
+
+      return json({ success: true });
+    }
+
+    // ── Update env vars on existing Render service ──
+    if (action === "update-env-vars") {
+      const { deploymentId: depId, envVars } = body;
+      if (!depId || !envVars) throw new Error("Missing deploymentId or envVars");
+
+      const { data: dep, error: depErr } = await supabase
+        .from("deployments")
+        .select("*, cloud_connections(*)")
+        .eq("id", depId)
+        .single();
+      if (depErr || !dep) throw new Error("Deployment not found");
+
+      const connection = (dep as any).cloud_connections;
+      if (!connection || connection.provider !== "render") throw new Error("Only Render deployments support env vars editing");
+
+      // Get the Render service ID from the deploy
+      const token = connection.token;
+      const RENDER_API = "https://api.render.com/v1";
+      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+      // Find service by deploy URL or name
+      const liveUrl = dep.live_url;
+      let serviceId = dep.deploy_id;
+
+      if (!serviceId && liveUrl) {
+        const svcName = liveUrl.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers });
+        if (listRes.ok && Array.isArray(listRes.data) && listRes.data.length > 0) {
+          serviceId = listRes.data[0].service?.id;
+        }
+      }
+
+      if (!serviceId) throw new Error("Could not find Render service ID");
+
+      // Update env vars
+      const envRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/env-vars`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(envVars.map((e: any) => ({ key: e.key, value: e.value }))),
+      });
+
+      if (!envRes.ok) throw new Error(`Failed to update env vars: ${JSON.stringify(envRes.data)}`);
+
+      return json({ success: true, message: "Environment variables updated" });
+    }
+
+    // ── Analyze project ──
     if (action === "analyze") {
       const { projectId: analyzeProjectId } = body;
       if (!analyzeProjectId) throw new Error("Missing projectId");
@@ -548,7 +587,6 @@ serve(async (req) => {
       }
 
       if (extractedFiles.length === 0) {
-        // Fallback
         await supabase.from("projects").update({ status: "ready", framework: "Unknown", project_type: "frontend" }).eq("id", analyzeProjectId);
         return json({ success: true, projectType: "frontend" });
       }
@@ -576,19 +614,16 @@ serve(async (req) => {
       const projectName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
       if (provider === "vercel") {
-        const res = await fetch(`https://api.vercel.com/v9/projects/${projectName}`, {
+        const res = await safeFetchJson(`https://api.vercel.com/v9/projects/${projectName}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const available = res.status === 404;
-        await res.text();
-        return json({ success: true, available, projectName });
+        return json({ success: true, available: res.status === 404, projectName });
       }
       if (provider === "render") {
-        const res = await fetch(`https://api.render.com/v1/services?name=${encodeURIComponent(projectName)}&limit=1`, {
+        const res = await safeFetchJson(`https://api.render.com/v1/services?name=${encodeURIComponent(projectName)}&limit=1`, {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         });
-        const data = await res.json();
-        const available = !data || data.length === 0;
+        const available = !res.data || !Array.isArray(res.data) || res.data.length === 0;
         return json({ success: true, available, projectName });
       }
       return json({ success: true, available: true, projectName });
@@ -601,20 +636,17 @@ serve(async (req) => {
 
       if (provider === "vercel") {
         const projName = domain.replace(/\.vercel\.app$/, "");
-        const res = await fetch(`https://api.vercel.com/v9/projects/${projName}`, {
+        const res = await safeFetchJson(`https://api.vercel.com/v9/projects/${projName}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const available = res.status === 404;
-        await res.text();
-        return json({ success: true, domain, available });
+        return json({ success: true, domain, available: res.status === 404 });
       }
       if (provider === "render") {
         const svcName = domain.replace(/\.onrender\.com$/, "");
-        const res = await fetch(`https://api.render.com/v1/services?name=${encodeURIComponent(svcName)}&limit=1`, {
+        const res = await safeFetchJson(`https://api.render.com/v1/services?name=${encodeURIComponent(svcName)}&limit=1`, {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         });
-        const data = await res.json();
-        const available = !data || data.length === 0;
+        const available = !res.data || !Array.isArray(res.data) || res.data.length === 0;
         return json({ success: true, domain, available });
       }
       return json({ success: true, domain, available: true });
@@ -625,19 +657,18 @@ serve(async (req) => {
       const { projectName, domain, token, provider } = body;
       if (!projectName || !domain || !token) throw new Error("Missing fields");
       if (provider === "vercel") {
-        const res = await fetch(`https://api.vercel.com/v10/projects/${encodeURIComponent(projectName)}/domains`, {
+        const res = await safeFetchJson(`https://api.vercel.com/v10/projects/${encodeURIComponent(projectName)}/domains`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ name: domain }),
         });
-        const data = await res.json();
-        if (!res.ok) return json({ success: false, error: data?.error?.message || JSON.stringify(data) }, 400);
-        return json({ success: true, domain: data });
+        if (!res.ok) return json({ success: false, error: res.data?.error?.message || JSON.stringify(res.data) }, 400);
+        return json({ success: true, domain: res.data });
       }
       return json({ success: false, error: "Not supported for this provider" }, 400);
     }
 
-    // ── Redeploy (trigger new deploy for existing deployment) ──
+    // ── Redeploy ──
     if (action === "redeploy") {
       const { deploymentId: redeployId } = body;
       if (!redeployId) throw new Error("Missing deploymentId");
@@ -645,7 +676,6 @@ serve(async (req) => {
       const { data: dep, error: depErr } = await supabase.from("deployments").select("*, projects(*), cloud_connections(*)").eq("id", redeployId).single();
       if (depErr || !dep) throw new Error("Deployment not found");
 
-      // Reset status
       await supabase.from("deployments").update({ status: "building", error_message: null, logs: "[Redeploy] Triggered new deployment...\n" }).eq("id", redeployId);
 
       const project = (dep as any).projects;
@@ -661,7 +691,6 @@ serve(async (req) => {
         }).eq("id", redeployId);
       };
 
-      // Re-clone from GitHub if applicable
       let extractedFiles: ExtractedFile[] = [];
       if (project.source_type === "github" && project.github_url) {
         await appendLog("Re-cloning GitHub repository...");
@@ -689,23 +718,14 @@ serve(async (req) => {
       let result: { deployId: string; liveUrl: string };
 
       if (connection.provider === "vercel") {
-        result = await deployToVercel(
-          connection.token, desiredSubdomain, extractedFiles, needsBuild,
-          project.build_command, project.output_dir, project.framework, appendLog
-        );
+        result = await deployToVercel(connection.token, desiredSubdomain, extractedFiles, needsBuild, project.build_command, project.output_dir, project.framework, appendLog);
       } else if (connection.provider === "render") {
-        result = await deployToRender(
-          connection.token, desiredSubdomain, project.github_url, extractedFiles, appendLog
-        );
+        result = await deployToRender(connection.token, desiredSubdomain, project.github_url, extractedFiles, appendLog);
       } else {
         throw new Error(`Unsupported provider for redeploy: ${connection.provider}`);
       }
 
-      await appendLog("Redeployment successful! ✅", {
-        status: "live",
-        live_url: result.liveUrl,
-        deploy_id: result.deployId,
-      });
+      await appendLog("Redeployment successful! ✅", { status: "live", live_url: result.liveUrl, deploy_id: result.deployId });
       return json({ success: true, url: result.liveUrl });
     }
 
@@ -751,7 +771,6 @@ serve(async (req) => {
 
     await appendLog(`Provider: ${provider} | Project: ${project.name} | Subdomain: ${desiredSubdomain} | Source: ${project.source_type}`);
 
-    // ── Get files ──
     let extractedFiles: ExtractedFile[] = [];
 
     if (project.source_type === "github" && project.github_url) {
@@ -794,24 +813,14 @@ serve(async (req) => {
     let result: { deployId: string; liveUrl: string };
 
     if (provider === "vercel") {
-      result = await deployToVercel(
-        token, desiredSubdomain, extractedFiles, needsBuild,
-        project.build_command, project.output_dir, project.framework,
-        appendLog
-      );
+      result = await deployToVercel(token, desiredSubdomain, extractedFiles, needsBuild, project.build_command, project.output_dir, project.framework, appendLog);
     } else if (provider === "render") {
-      result = await deployToRender(
-        token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars
-      );
+      result = await deployToRender(token, desiredSubdomain, project.github_url, extractedFiles, appendLog, envVars);
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
 
-    await appendLog("Deployment successful! ✅", {
-      status: "live",
-      live_url: result.liveUrl,
-      deploy_id: result.deployId,
-    });
+    await appendLog("Deployment successful! ✅", { status: "live", live_url: result.liveUrl, deploy_id: result.deployId });
     await supabase.from("projects").update({ status: "live" }).eq("id", projectId);
     return json({ success: true, url: result.liveUrl });
 
