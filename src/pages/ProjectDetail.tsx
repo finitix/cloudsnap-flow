@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server } from "lucide-react";
+import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
@@ -27,6 +27,7 @@ export default function ProjectDetail() {
   const [domainAvailable, setDomainAvailable] = useState<boolean | null>(null);
   const [checkingDomain, setCheckingDomain] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
+  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -170,6 +171,7 @@ export default function ProjectDetail() {
           projectId: project.id,
           connectionId: conn.id,
           customDomain: fullDomain,
+          envVars: conn.provider === "render" && envVars.length > 0 ? envVars.filter((e) => e.key && e.value) : undefined,
         },
       });
       if (fnError) {
@@ -379,6 +381,66 @@ export default function ProjectDetail() {
             <p className="text-xs text-muted-foreground mt-3 bg-muted/50 rounded-lg p-2">
               💡 You have both frontend (Vercel) and backend (Render) connections. Select the appropriate one for your deployment target.
             </p>
+          )}
+
+          {/* Environment Variables (Render only) */}
+          {conn?.provider === "render" && (
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <Settings2 className="h-3.5 w-3.5 text-primary" /> Environment Variables
+                </h4>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEnvVars([...envVars, { key: "", value: "" }])}
+                  className="text-xs"
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Add Variable
+                </Button>
+              </div>
+              {envVars.length === 0 ? (
+                <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
+                  No environment variables set. Click "Add Variable" to configure env vars for your Render deployment.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {envVars.map((env, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <Input
+                        placeholder="KEY"
+                        value={env.key}
+                        onChange={(e) => {
+                          const updated = [...envVars];
+                          updated[idx].key = e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "");
+                          setEnvVars(updated);
+                        }}
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <Input
+                        placeholder="value"
+                        type="password"
+                        value={env.value}
+                        onChange={(e) => {
+                          const updated = [...envVars];
+                          updated[idx].value = e.target.value;
+                          setEnvVars(updated);
+                        }}
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                        onClick={() => setEnvVars(envVars.filter((_, i) => i !== idx))}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
