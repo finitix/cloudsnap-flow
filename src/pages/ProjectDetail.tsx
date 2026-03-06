@@ -15,6 +15,7 @@ import { toast } from "sonner";
 export default function ProjectDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [project, setProject] = useState<any>(null);
   const [connections, setConnections] = useState<any[]>([]);
   const [selectedConnection, setSelectedConnection] = useState("");
