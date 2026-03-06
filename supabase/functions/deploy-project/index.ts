@@ -33,8 +33,9 @@ async function safeFetchJson(url: string, options?: RequestInit): Promise<{ ok: 
   return { ok: res.ok, status: res.status, data };
 }
 
-async function sha256Hex(data: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", data);
+// Vercel uses SHA-1 for file digests, NOT SHA-256
+async function sha1Hex(data: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-1", data);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -172,40 +173,32 @@ async function deployToVercel(
     }
   }
 
-  // Build SHA map for all files first
+  // Build SHA-1 map for all files (Vercel requires SHA-1)
   await appendLog(`Preparing ${files.length} files for Vercel...`, { status: "deploying" });
-  const fileShaMap: Map<string, { file: ExtractedFile; sha: string }> = new Map();
-  for (const f of files) {
-    const sha = await sha256Hex(f.data);
-    fileShaMap.set(sha, { file: f, sha });
-  }
+  const fileShaMap: Map<string, ExtractedFile> = new Map();
   const fileEntries: Array<{ file: string; sha: string; size: number }> = [];
-  for (const [sha, entry] of fileShaMap) {
-    // Use original file objects from files array to preserve order
-  }
   for (const f of files) {
-    const sha = await sha256Hex(f.data);
+    const sha = await sha1Hex(f.data);
+    fileShaMap.set(sha, f);
     fileEntries.push({ file: f.path, sha, size: f.data.length });
   }
 
-  // Helper to upload specific files by SHA
-  async function uploadFileBySha(sha: string, token: string): Promise<boolean> {
-    const entry = fileShaMap.get(sha);
-    if (!entry) return false;
-    const f = entry.file;
+  // Helper to upload a file by its SHA-1 hash
+  async function uploadFileBySha(sha: string, tok: string): Promise<boolean> {
+    const f = fileShaMap.get(sha);
+    if (!f) return false;
     try {
       const uploadRes = await fetch("https://api.vercel.com/v2/files", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${tok}`,
           "Content-Type": "application/octet-stream",
           "x-vercel-digest": sha,
           "Content-Length": String(f.data.length),
         },
         body: f.data,
       });
-      // Consume body
-      await uploadRes.text();
+      await uploadRes.text(); // consume body
       return uploadRes.ok || uploadRes.status === 409;
     } catch {
       return false;
@@ -219,7 +212,7 @@ async function deployToVercel(
     const batch = files.slice(i, i + batchSize);
     await Promise.all(
       batch.map(async (f) => {
-        const sha = await sha256Hex(f.data);
+        const sha = await sha1Hex(f.data);
         await uploadFileBySha(sha, token);
       })
     );
