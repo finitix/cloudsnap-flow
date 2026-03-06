@@ -466,6 +466,7 @@ async function deployToRender(
           }
           throw new Error(`Render deploy failed: ${status}. Check the build logs above for details.`);
         }
+      }
     } catch (e: any) {
       if (e.message.includes("Render deploy failed")) throw e;
       await appendLog(`Poll error: ${e.message}`);
