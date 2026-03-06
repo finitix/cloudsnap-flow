@@ -272,7 +272,9 @@ async function deployToVercel(
 async function deployToRender(
   token: string, serviceName: string, githubUrl: string | null, files: ExtractedFile[],
   appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>,
-  envVars?: Array<{ key: string; value: string }>
+  envVars?: Array<{ key: string; value: string }>,
+  userStartCommand?: string,
+  userBuildCommand?: string,
 ): Promise<{ deployId: string; liveUrl: string }> {
   const RENDER_API = "https://api.render.com/v1";
   const headers = {
