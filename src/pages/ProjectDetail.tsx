@@ -203,7 +203,36 @@ export default function ProjectDetail() {
     }
   };
 
-  if (!project) return <DashboardLayout><div className="p-8 text-muted-foreground">Loading...</div></DashboardLayout>;
+  const [deletingProject, setDeletingProject] = useState(false);
+
+  const handleDeleteProject = async () => {
+    if (!project || !user) return;
+    setDeletingProject(true);
+    try {
+      // Delete all deployments for this project
+      await supabase.from("deployments").delete().eq("project_id", project.id);
+
+      // Delete storage files for this project
+      const { data: files } = await supabase.storage.from("project-uploads").list(`${user.id}`);
+      if (files?.length) {
+        const projectFiles = files.filter((f) => f.name.includes(project.id) || f.name.includes(project.name));
+        if (projectFiles.length > 0) {
+          await supabase.storage.from("project-uploads").remove(projectFiles.map((f) => `${user.id}/${f.name}`));
+        }
+      }
+
+      // Delete the project itself
+      const { error } = await supabase.from("projects").delete().eq("id", project.id);
+      if (error) throw error;
+
+      toast.success("Project deleted permanently.");
+      navigate("/projects");
+    } catch (err: any) {
+      toast.error("Failed to delete project: " + err.message);
+    } finally {
+      setDeletingProject(false);
+    }
+  };
 
   const conn = getConn();
   const providerSuffix = getProviderDomain();
