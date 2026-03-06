@@ -349,20 +349,16 @@ async function deployToRender(
 
     await appendLog(`Detected runtime: ${runtime}`);
 
-    if (githubUrl && !hasDocker) {
-      // Create service from GitHub repo
+    if (githubUrl) {
       const match = githubUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
       if (!match) throw new Error("Invalid GitHub URL for Render");
       const repoUrl = `https://github.com/${match[1]}/${match[2].replace(/\.git$/, "")}`;
 
-      await appendLog(`Creating Render service from GitHub: ${repoUrl}...`);
-      const createRes = await fetch(`${RENDER_API}/services`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          type: "web_service",
-          name: serviceName,
-          ownerId,
+      const createPayload = {
+        type: "web_service",
+        name: serviceName,
+        ownerId,
+        serviceDetails: {
           repo: repoUrl,
           autoDeploy: "yes",
           branch: "main",
@@ -371,30 +367,26 @@ async function deployToRender(
           startCommand: hasDocker ? undefined : startCommand,
           plan: "free",
           region: "oregon",
-        }),
+          envSpecificDetails: { buildCommand: hasDocker ? undefined : buildCommand, startCommand: hasDocker ? undefined : startCommand },
+        },
+      };
+
+      await appendLog(`Creating Render service from GitHub: ${repoUrl}...`);
+      const createRes = await fetch(`${RENDER_API}/services`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(createPayload),
       });
 
       const createData = await createRes.json();
       if (!createRes.ok) {
-        // Try master branch
         if (JSON.stringify(createData).includes("branch")) {
           await appendLog("main branch not found, trying master...");
+          createPayload.serviceDetails.branch = "master";
           const retryRes = await fetch(`${RENDER_API}/services`, {
             method: "POST",
             headers,
-            body: JSON.stringify({
-              type: "web_service",
-              name: serviceName,
-              ownerId,
-              repo: repoUrl,
-              autoDeploy: "yes",
-              branch: "master",
-              runtime: hasDocker ? "docker" : runtime,
-              buildCommand: hasDocker ? undefined : buildCommand,
-              startCommand: hasDocker ? undefined : startCommand,
-              plan: "free",
-              region: "oregon",
-            }),
+            body: JSON.stringify(createPayload),
           });
           const retryData = await retryRes.json();
           if (!retryRes.ok) throw new Error(`Render create failed: ${JSON.stringify(retryData)}`);
@@ -408,28 +400,6 @@ async function deployToRender(
         serviceUrl = `https://${serviceName}.onrender.com`;
       }
       await appendLog(`Render service created: ${serviceId} ✓`);
-    } else if (hasDocker) {
-      // Docker-based service
-      await appendLog("Creating Docker-based Render service...");
-      const createRes = await fetch(`${RENDER_API}/services`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          type: "web_service",
-          name: serviceName,
-          ownerId,
-          runtime: "docker",
-          plan: "free",
-          region: "oregon",
-          repo: githubUrl ? `https://github.com/${githubUrl.match(/github\.com\/([^/]+)\/([^/]+)/)?.[1]}/${githubUrl.match(/github\.com\/([^/]+)\/([^/]+)/)?.[2]?.replace(/\.git$/, "")}` : undefined,
-          autoDeploy: githubUrl ? "yes" : "no",
-        }),
-      });
-      const createData = await createRes.json();
-      if (!createRes.ok) throw new Error(`Render create failed: ${JSON.stringify(createData)}`);
-      serviceId = createData.service?.id || createData.id;
-      serviceUrl = `https://${serviceName}.onrender.com`;
-      await appendLog(`Docker service created: ${serviceId} ✓`);
     } else {
       throw new Error("Render deployment requires a GitHub URL with a supported backend project (Node.js, Python, Go, Ruby, or Docker).");
     }
