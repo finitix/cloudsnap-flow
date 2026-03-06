@@ -27,6 +27,7 @@ export default function ProjectDetail() {
   const [domainAvailable, setDomainAvailable] = useState<boolean | null>(null);
   const [checkingDomain, setCheckingDomain] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
+  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
