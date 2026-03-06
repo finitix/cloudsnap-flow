@@ -776,9 +776,9 @@ serve(async (req) => {
     await appendLog(`Files: ${fileNames.join(", ")}${extractedFiles.length > 10 ? ` ...+${extractedFiles.length - 10} more` : ""}`);
 
     const needsBuild = detectBuildNeeded(extractedFiles);
-    const projectType = detectProjectType(extractedFiles);
-    await appendLog(needsBuild ? "Build-required project detected" : "Static project — no build step");
-    await appendLog(`Project analysis: frontend=${projectType.hasFrontend}, backend=${projectType.hasBackend}`);
+    const projectAnalysis = detectProjectType(extractedFiles);
+    await appendLog(needsBuild ? `Build-required project detected (${projectAnalysis.framework})` : "Static project — no build step");
+    await appendLog(`Project analysis: frontend=${projectAnalysis.hasFrontend}, backend=${projectAnalysis.hasBackend}, framework=${projectAnalysis.framework}`);
 
     let result: { deployId: string; liveUrl: string };
 
