@@ -172,31 +172,55 @@ async function deployToVercel(
     }
   }
 
-  await appendLog(`Uploading ${files.length} files to Vercel...`, { status: "deploying" });
+  // Build SHA map for all files first
+  await appendLog(`Preparing ${files.length} files for Vercel...`, { status: "deploying" });
+  const fileShaMap: Map<string, { file: ExtractedFile; sha: string }> = new Map();
+  for (const f of files) {
+    const sha = await sha256Hex(f.data);
+    fileShaMap.set(sha, { file: f, sha });
+  }
   const fileEntries: Array<{ file: string; sha: string; size: number }> = [];
+  for (const [sha, entry] of fileShaMap) {
+    // Use original file objects from files array to preserve order
+  }
+  for (const f of files) {
+    const sha = await sha256Hex(f.data);
+    fileEntries.push({ file: f.path, sha, size: f.data.length });
+  }
+
+  // Helper to upload specific files by SHA
+  async function uploadFileBySha(sha: string, token: string): Promise<boolean> {
+    const entry = fileShaMap.get(sha);
+    if (!entry) return false;
+    const f = entry.file;
+    try {
+      const uploadRes = await fetch("https://api.vercel.com/v2/files", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/octet-stream",
+          "x-vercel-digest": sha,
+          "Content-Length": String(f.data.length),
+        },
+        body: f.data,
+      });
+      // Consume body
+      await uploadRes.text();
+      return uploadRes.ok || uploadRes.status === 409;
+    } catch {
+      return false;
+    }
+  }
+
+  // Initial bulk upload
+  await appendLog(`Uploading ${files.length} files to Vercel...`);
   const batchSize = 10;
   for (let i = 0; i < files.length; i += batchSize) {
     const batch = files.slice(i, i + batchSize);
     await Promise.all(
       batch.map(async (f) => {
         const sha = await sha256Hex(f.data);
-        const uploadRes = await fetch("https://api.vercel.com/v2/files", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/octet-stream",
-            "x-vercel-digest": sha,
-            "x-vercel-size": String(f.data.length),
-          },
-          body: f.data,
-        });
-        if (!uploadRes.ok && uploadRes.status !== 409) {
-          const errText = await uploadRes.text();
-          console.error(`File upload failed for ${f.path}: ${errText}`);
-        } else {
-          await uploadRes.text();
-        }
-        fileEntries.push({ file: f.path, sha, size: f.data.length });
+        await uploadFileBySha(sha, token);
       })
     );
     if (i + batchSize < files.length) {
@@ -218,12 +242,34 @@ async function deployToVercel(
     };
   }
 
-  await appendLog("Creating Vercel deployment...");
-  let dr = await safeFetchJson("https://api.vercel.com/v13/deployments", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(deployPayload),
-  });
+  // Deploy with retry for missing_files (up to 3 attempts)
+  let dr: any;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await appendLog(attempt === 0 ? "Creating Vercel deployment..." : `Retrying deployment (attempt ${attempt + 1})...`);
+    dr = await safeFetchJson("https://api.vercel.com/v13/deployments", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(deployPayload),
+    });
+
+    if (dr.ok) break;
+
+    // Handle missing_files by re-uploading them
+    if (dr.data?.error?.code === "missing_files" && dr.data?.error?.missing) {
+      const missing: string[] = dr.data.error.missing;
+      await appendLog(`${missing.length} files need re-upload, uploading...`);
+      const reBatch = 10;
+      for (let i = 0; i < missing.length; i += reBatch) {
+        const batch = missing.slice(i, i + reBatch);
+        await Promise.all(batch.map((sha) => uploadFileBySha(sha, token)));
+      }
+      await appendLog(`Re-uploaded ${missing.length} files ✓`);
+      continue; // retry deployment
+    }
+
+    // Not a missing_files error
+    break;
+  }
 
   if (!dr.ok) {
     await appendLog(`Deploy error: ${JSON.stringify(dr.data)}`);
@@ -235,7 +281,7 @@ async function deployToVercel(
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(deployPayload),
       });
-      if (!dr.ok) throw new Error(`Static deploy also failed: ${JSON.stringify(dr.data)}`);
+      if (!dr.ok) throw new Error(`Deploy failed: ${JSON.stringify(dr.data)}`);
     } else {
       throw new Error(`Deploy failed: ${JSON.stringify(dr.data)}`);
     }
