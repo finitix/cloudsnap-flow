@@ -234,6 +234,8 @@ export default function ProjectDetail() {
     }
   };
 
+  if (!project) return <DashboardLayout><div className="p-8 text-muted-foreground">Loading...</div></DashboardLayout>;
+
   const conn = getConn();
   const providerSuffix = getProviderDomain();
   const hasBothTypes = frontendConnections.length > 0 && backendConnections.length > 0;
