@@ -382,6 +382,66 @@ export default function ProjectDetail() {
               💡 You have both frontend (Vercel) and backend (Render) connections. Select the appropriate one for your deployment target.
             </p>
           )}
+
+          {/* Environment Variables (Render only) */}
+          {conn?.provider === "render" && (
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <Settings2 className="h-3.5 w-3.5 text-primary" /> Environment Variables
+                </h4>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEnvVars([...envVars, { key: "", value: "" }])}
+                  className="text-xs"
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Add Variable
+                </Button>
+              </div>
+              {envVars.length === 0 ? (
+                <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
+                  No environment variables set. Click "Add Variable" to configure env vars for your Render deployment.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {envVars.map((env, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <Input
+                        placeholder="KEY"
+                        value={env.key}
+                        onChange={(e) => {
+                          const updated = [...envVars];
+                          updated[idx].key = e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "");
+                          setEnvVars(updated);
+                        }}
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <Input
+                        placeholder="value"
+                        type="password"
+                        value={env.value}
+                        onChange={(e) => {
+                          const updated = [...envVars];
+                          updated[idx].value = e.target.value;
+                          setEnvVars(updated);
+                        }}
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                        onClick={() => setEnvVars(envVars.filter((_, i) => i !== idx))}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Deployment History */}
