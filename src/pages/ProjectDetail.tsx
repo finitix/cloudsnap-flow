@@ -171,6 +171,7 @@ export default function ProjectDetail() {
           projectId: project.id,
           connectionId: conn.id,
           customDomain: fullDomain,
+          envVars: conn.provider === "render" && envVars.length > 0 ? envVars.filter((e) => e.key && e.value) : undefined,
         },
       });
       if (fnError) {
