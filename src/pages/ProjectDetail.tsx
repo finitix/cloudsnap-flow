@@ -34,6 +34,8 @@ export default function ProjectDetail() {
   const [renaming, setRenaming] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [renderLogs, setRenderLogs] = useState<Record<string, string[]>>({});
+  const [fetchingLogs, setFetchingLogs] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
