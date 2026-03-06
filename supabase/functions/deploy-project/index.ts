@@ -390,8 +390,9 @@ async function deployToRender(
         runtime,
         plan: "free",
         region: "oregon",
-        ...(runtime !== "docker" ? { buildCommand, startCommand } : {}),
         envSpecificDetails: {
+          buildCommand: runtime !== "docker" ? buildCommand : undefined,
+          startCommand: runtime !== "docker" ? startCommand : undefined,
           envVars: envVars && envVars.length > 0
             ? envVars.map((e: any) => ({ key: e.key, value: e.value }))
             : [],
