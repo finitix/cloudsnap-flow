@@ -44,17 +44,92 @@ function detectBuildNeeded(files: ExtractedFile[]): boolean {
   return files.some((f) => f.path === "package.json" || f.path === "requirements.txt" || f.path === "Cargo.toml");
 }
 
-function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasBackend: boolean } {
+function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasBackend: boolean; framework: string; buildCommand: string; outputDir: string; startCommand: string } {
   const fileNames = files.map((f) => f.path.toLowerCase());
-  const hasFrontend = fileNames.some((f) =>
-    f === "package.json" || f === "index.html" || f.endsWith(".tsx") || f.endsWith(".jsx") || f.endsWith(".vue")
-  );
-  const hasBackend = fileNames.some((f) =>
-    f === "requirements.txt" || f === "main.py" || f === "app.py" || f === "server.js" ||
-    f === "server.ts" || f === "Dockerfile" || f === "Procfile" || f === "go.mod" ||
-    f === "Gemfile" || f === "manage.py"
-  );
-  return { hasFrontend, hasBackend };
+  const hasPackageJson = fileNames.includes("package.json");
+  const hasIndexHtml = fileNames.includes("index.html");
+  const hasTsx = fileNames.some((f) => f.endsWith(".tsx") || f.endsWith(".jsx"));
+  const hasVue = fileNames.some((f) => f.endsWith(".vue"));
+  const hasPython = fileNames.some((f) => f === "requirements.txt" || f === "main.py" || f === "app.py" || f === "manage.py");
+  const hasGo = fileNames.includes("go.mod");
+  const hasRuby = fileNames.includes("gemfile");
+  const hasDocker = fileNames.includes("dockerfile");
+  const hasProcfile = fileNames.includes("procfile");
+  const hasServerFile = fileNames.some((f) => f === "server.js" || f === "server.ts" || f === "app.js" || f === "app.ts");
+  const hasNextConfig = fileNames.some((f) => f === "next.config.js" || f === "next.config.mjs" || f === "next.config.ts");
+  const hasViteConfig = fileNames.some((f) => f === "vite.config.ts" || f === "vite.config.js");
+
+  const hasFrontend = hasIndexHtml || hasTsx || hasVue || hasViteConfig;
+  const hasBackend = hasPython || hasGo || hasRuby || hasDocker || hasProcfile || hasServerFile || hasNextConfig;
+
+  // Detect framework
+  let framework = "Unknown";
+  let buildCommand = "npm run build";
+  let outputDir = "dist";
+  let startCommand = "npm start";
+
+  if (hasNextConfig) {
+    framework = "Next.js";
+    buildCommand = "npm run build";
+    outputDir = ".next";
+    startCommand = "npm start";
+  } else if (hasViteConfig && hasTsx) {
+    framework = "React";
+    buildCommand = "npm run build";
+    outputDir = "dist";
+  } else if (hasVue) {
+    framework = "Vue";
+    buildCommand = "npm run build";
+    outputDir = "dist";
+  } else if (hasTsx) {
+    framework = "React";
+  } else if (hasPython) {
+    framework = "Python";
+    buildCommand = "pip install -r requirements.txt";
+    outputDir = "";
+    startCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
+  } else if (hasGo) {
+    framework = "Go";
+    buildCommand = "go build -o main .";
+    startCommand = "./main";
+  } else if (hasRuby) {
+    framework = "Ruby";
+    buildCommand = "bundle install";
+    startCommand = "bundle exec rails server -p $PORT";
+  } else if (hasDocker) {
+    framework = "Docker";
+    buildCommand = "";
+    startCommand = "";
+  } else if (hasServerFile) {
+    framework = "Node.js";
+    buildCommand = "npm install";
+    startCommand = "node server.js";
+  } else if (hasPackageJson) {
+    framework = "Node.js";
+  } else if (hasIndexHtml) {
+    framework = "Static HTML";
+    buildCommand = "";
+    outputDir = ".";
+  }
+
+  // Also try to read package.json for more info
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (pkgFile) {
+    try {
+      const pkgJson = JSON.parse(new TextDecoder().decode(pkgFile.data));
+      const deps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+      if (deps["next"]) { framework = "Next.js"; outputDir = ".next"; }
+      else if (deps["react"]) { framework = "React"; }
+      else if (deps["vue"]) { framework = "Vue"; }
+      else if (deps["svelte"]) { framework = "Svelte"; }
+      else if (deps["express"] || deps["fastify"] || deps["koa"] || deps["hapi"]) {
+        framework = "Node.js";
+        if (!hasFrontend) startCommand = pkgJson.scripts?.start ? "npm start" : "node server.js";
+      }
+    } catch {}
+  }
+
+  return { hasFrontend, hasBackend, framework, buildCommand, outputDir, startCommand };
 }
 
 async function downloadGitHubRepoZip(githubUrl: string): Promise<ArrayBuffer> {
