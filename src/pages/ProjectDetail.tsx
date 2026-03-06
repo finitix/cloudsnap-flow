@@ -49,9 +49,24 @@ export default function ProjectDetail() {
         supabase.from("deployments").select("*").eq("project_id", id).order("created_at", { ascending: false }),
       ]);
       setProject(pRes.data);
-      setConnections(cRes.data || []);
+      const conns = cRes.data || [];
+      setConnections(conns);
       setDeployments(dRes.data || []);
-      if (cRes.data?.[0]) setSelectedConnection(cRes.data[0].id);
+
+      // Auto-select appropriate connection based on project type
+      const proj = pRes.data;
+      if (proj && conns.length > 0) {
+        const isBackend = proj.project_type === "backend" || proj.project_type === "fullstack";
+        const renderConn = conns.find((c: any) => c.provider === "render");
+        const vercelConn = conns.find((c: any) => c.provider === "vercel");
+        if (isBackend && renderConn) {
+          setSelectedConnection(renderConn.id);
+        } else if (!isBackend && vercelConn) {
+          setSelectedConnection(vercelConn.id);
+        } else if (conns[0]) {
+          setSelectedConnection(conns[0].id);
+        }
+      }
     };
     load();
 
