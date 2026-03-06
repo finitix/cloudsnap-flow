@@ -204,7 +204,6 @@ export default function ProjectDetail() {
     }
   };
 
-  const [deletingProject, setDeletingProject] = useState(false);
 
   const handleDeleteProject = async () => {
     if (!project || !user) return;
