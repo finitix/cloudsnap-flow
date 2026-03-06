@@ -33,8 +33,9 @@ async function safeFetchJson(url: string, options?: RequestInit): Promise<{ ok: 
   return { ok: res.ok, status: res.status, data };
 }
 
-async function sha256Hex(data: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", data);
+// Vercel uses SHA-1 for file digests, NOT SHA-256
+async function sha1Hex(data: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-1", data);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
