@@ -329,6 +329,7 @@ async function deployToRender(
     const hasGo = files.some((f) => f.path === "go.mod");
     const hasRuby = files.some((f) => f.path === "Gemfile");
     const hasDocker = files.some((f) => f.path === "Dockerfile");
+    const hasServerJs = files.some((f) => f.path === "server.js" || f.path === "server.ts" || f.path === "app.js" || f.path === "app.ts" || f.path === "index.js" || f.path === "index.ts");
 
     if (hasPython) {
       runtime = "python";
@@ -340,9 +341,25 @@ async function deployToRender(
       runtime = "ruby"; startCommand = "bundle exec rails server -p $PORT"; buildCommand = "bundle install";
     } else if (hasDocker) {
       runtime = "docker"; startCommand = ""; buildCommand = "";
+    } else if (hasServerJs) {
+      // Detect the exact entry file for start command
+      const entryFile = ["server.js", "server.ts", "app.js", "app.ts", "index.js", "index.ts"]
+        .find((f) => files.some((file) => file.path === f)) || "server.js";
+      startCommand = `node ${entryFile}`;
+      buildCommand = "npm install";
+
+      // Check package.json for a start script
+      const pkgFile = files.find((f) => f.path === "package.json");
+      if (pkgFile) {
+        try {
+          const pkg = JSON.parse(new TextDecoder().decode(pkgFile.data));
+          if (pkg.scripts?.start) startCommand = "npm start";
+          if (pkg.scripts?.build) buildCommand = "npm install && npm run build";
+        } catch {}
+      }
     }
 
-    await appendLog(`Detected runtime: ${runtime}`);
+    await appendLog(`Detected runtime: ${runtime} | build: ${buildCommand} | start: ${startCommand}`);
 
     if (!githubUrl) {
       throw new Error("Render deployment requires a GitHub URL. Please create your project from a GitHub repository.");
@@ -423,10 +440,10 @@ async function deployToRender(
     deployId = serviceId;
   }
 
-  // Poll for deploy status
+  // Poll for deploy status (5s intervals)
   let attempts = 0;
-  while (attempts < 60) {
-    await new Promise((r) => setTimeout(r, 10000));
+  while (attempts < 90) {
+    await new Promise((r) => setTimeout(r, 5000));
     try {
       const statusRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
       if (statusRes.ok && Array.isArray(statusRes.data) && statusRes.data.length > 0) {
@@ -438,7 +455,16 @@ async function deployToRender(
           break;
         }
         if (status === "deactivated" || status === "build_failed" || status === "update_failed" || status === "canceled") {
-          throw new Error(`Render deploy failed: ${status}`);
+          // Try to fetch build logs for better error info
+          const latestDeployId = latest.id;
+          if (latestDeployId) {
+            const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestDeployId}/logs`, { headers });
+            if (logRes.ok && Array.isArray(logRes.data)) {
+              const logLines = logRes.data.map((l: any) => l.message || l.log || JSON.stringify(l)).join("\n");
+              await appendLog(`Build logs:\n${logLines.slice(-2000)}`);
+            }
+          }
+          throw new Error(`Render deploy failed: ${status}. Check the build logs above for details.`);
         }
       }
     } catch (e: any) {
