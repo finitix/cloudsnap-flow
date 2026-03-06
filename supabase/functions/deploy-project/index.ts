@@ -44,17 +44,92 @@ function detectBuildNeeded(files: ExtractedFile[]): boolean {
   return files.some((f) => f.path === "package.json" || f.path === "requirements.txt" || f.path === "Cargo.toml");
 }
 
-function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasBackend: boolean } {
+function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasBackend: boolean; framework: string; buildCommand: string; outputDir: string; startCommand: string } {
   const fileNames = files.map((f) => f.path.toLowerCase());
-  const hasFrontend = fileNames.some((f) =>
-    f === "package.json" || f === "index.html" || f.endsWith(".tsx") || f.endsWith(".jsx") || f.endsWith(".vue")
-  );
-  const hasBackend = fileNames.some((f) =>
-    f === "requirements.txt" || f === "main.py" || f === "app.py" || f === "server.js" ||
-    f === "server.ts" || f === "Dockerfile" || f === "Procfile" || f === "go.mod" ||
-    f === "Gemfile" || f === "manage.py"
-  );
-  return { hasFrontend, hasBackend };
+  const hasPackageJson = fileNames.includes("package.json");
+  const hasIndexHtml = fileNames.includes("index.html");
+  const hasTsx = fileNames.some((f) => f.endsWith(".tsx") || f.endsWith(".jsx"));
+  const hasVue = fileNames.some((f) => f.endsWith(".vue"));
+  const hasPython = fileNames.some((f) => f === "requirements.txt" || f === "main.py" || f === "app.py" || f === "manage.py");
+  const hasGo = fileNames.includes("go.mod");
+  const hasRuby = fileNames.includes("gemfile");
+  const hasDocker = fileNames.includes("dockerfile");
+  const hasProcfile = fileNames.includes("procfile");
+  const hasServerFile = fileNames.some((f) => f === "server.js" || f === "server.ts" || f === "app.js" || f === "app.ts");
+  const hasNextConfig = fileNames.some((f) => f === "next.config.js" || f === "next.config.mjs" || f === "next.config.ts");
+  const hasViteConfig = fileNames.some((f) => f === "vite.config.ts" || f === "vite.config.js");
+
+  const hasFrontend = hasIndexHtml || hasTsx || hasVue || hasViteConfig;
+  const hasBackend = hasPython || hasGo || hasRuby || hasDocker || hasProcfile || hasServerFile || hasNextConfig;
+
+  // Detect framework
+  let framework = "Unknown";
+  let buildCommand = "npm run build";
+  let outputDir = "dist";
+  let startCommand = "npm start";
+
+  if (hasNextConfig) {
+    framework = "Next.js";
+    buildCommand = "npm run build";
+    outputDir = ".next";
+    startCommand = "npm start";
+  } else if (hasViteConfig && hasTsx) {
+    framework = "React";
+    buildCommand = "npm run build";
+    outputDir = "dist";
+  } else if (hasVue) {
+    framework = "Vue";
+    buildCommand = "npm run build";
+    outputDir = "dist";
+  } else if (hasTsx) {
+    framework = "React";
+  } else if (hasPython) {
+    framework = "Python";
+    buildCommand = "pip install -r requirements.txt";
+    outputDir = "";
+    startCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
+  } else if (hasGo) {
+    framework = "Go";
+    buildCommand = "go build -o main .";
+    startCommand = "./main";
+  } else if (hasRuby) {
+    framework = "Ruby";
+    buildCommand = "bundle install";
+    startCommand = "bundle exec rails server -p $PORT";
+  } else if (hasDocker) {
+    framework = "Docker";
+    buildCommand = "";
+    startCommand = "";
+  } else if (hasServerFile) {
+    framework = "Node.js";
+    buildCommand = "npm install";
+    startCommand = "node server.js";
+  } else if (hasPackageJson) {
+    framework = "Node.js";
+  } else if (hasIndexHtml) {
+    framework = "Static HTML";
+    buildCommand = "";
+    outputDir = ".";
+  }
+
+  // Also try to read package.json for more info
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (pkgFile) {
+    try {
+      const pkgJson = JSON.parse(new TextDecoder().decode(pkgFile.data));
+      const deps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+      if (deps["next"]) { framework = "Next.js"; outputDir = ".next"; }
+      else if (deps["react"]) { framework = "React"; }
+      else if (deps["vue"]) { framework = "Vue"; }
+      else if (deps["svelte"]) { framework = "Svelte"; }
+      else if (deps["express"] || deps["fastify"] || deps["koa"] || deps["hapi"]) {
+        framework = "Node.js";
+        if (!hasFrontend) startCommand = pkgJson.scripts?.start ? "npm start" : "node server.js";
+      }
+    } catch {}
+  }
+
+  return { hasFrontend, hasBackend, framework, buildCommand, outputDir, startCommand };
 }
 
 async function downloadGitHubRepoZip(githubUrl: string): Promise<ArrayBuffer> {
@@ -434,6 +509,55 @@ serve(async (req) => {
       return json({ success: true });
     }
 
+    // ── Analyze project (real analysis) ──
+    if (action === "analyze") {
+      const { projectId: analyzeProjectId } = body;
+      if (!analyzeProjectId) throw new Error("Missing projectId");
+
+      const { data: proj, error: projErr } = await supabase.from("projects").select("*").eq("id", analyzeProjectId).single();
+      if (projErr || !proj) throw new Error("Project not found");
+
+      let extractedFiles: ExtractedFile[] = [];
+
+      if (proj.source_type === "github" && proj.github_url) {
+        const zipBuffer = await downloadGitHubRepoZip(proj.github_url);
+        extractedFiles = extractZipFilesRaw(zipBuffer);
+      } else if (proj.source_type === "zip") {
+        const { data: fileList } = await supabase.storage
+          .from("project-uploads")
+          .list(proj.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
+        if (fileList && fileList.length > 0) {
+          const filePath = `${proj.user_id}/${fileList[0].name}`;
+          const { data: fileData } = await supabase.storage.from("project-uploads").download(filePath);
+          if (fileData) {
+            const zipBuffer = await fileData.arrayBuffer();
+            extractedFiles = extractZipFilesRaw(zipBuffer);
+          }
+        }
+      }
+
+      if (extractedFiles.length === 0) {
+        // Fallback
+        await supabase.from("projects").update({ status: "ready", framework: "Unknown", project_type: "frontend" }).eq("id", analyzeProjectId);
+        return json({ success: true, projectType: "frontend" });
+      }
+
+      const analysis = detectProjectType(extractedFiles);
+      let projectType = "frontend";
+      if (analysis.hasBackend && analysis.hasFrontend) projectType = "fullstack";
+      else if (analysis.hasBackend && !analysis.hasFrontend) projectType = "backend";
+
+      await supabase.from("projects").update({
+        status: "ready",
+        framework: analysis.framework,
+        project_type: projectType,
+        build_command: analysis.buildCommand || "npm run build",
+        output_dir: analysis.outputDir || "dist",
+      }).eq("id", analyzeProjectId);
+
+      return json({ success: true, projectType, framework: analysis.framework, hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend });
+    }
+
     // ── Check project-name availability ──
     if (action === "check-name") {
       const { name, provider, token } = body;
@@ -652,9 +776,9 @@ serve(async (req) => {
     await appendLog(`Files: ${fileNames.join(", ")}${extractedFiles.length > 10 ? ` ...+${extractedFiles.length - 10} more` : ""}`);
 
     const needsBuild = detectBuildNeeded(extractedFiles);
-    const projectType = detectProjectType(extractedFiles);
-    await appendLog(needsBuild ? "Build-required project detected" : "Static project — no build step");
-    await appendLog(`Project analysis: frontend=${projectType.hasFrontend}, backend=${projectType.hasBackend}`);
+    const projectAnalysis = detectProjectType(extractedFiles);
+    await appendLog(needsBuild ? `Build-required project detected (${projectAnalysis.framework})` : "Static project — no build step");
+    await appendLog(`Project analysis: frontend=${projectAnalysis.hasFrontend}, backend=${projectAnalysis.hasBackend}, framework=${projectAnalysis.framework}`);
 
     let result: { deployId: string; liveUrl: string };
 

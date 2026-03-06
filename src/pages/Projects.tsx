@@ -55,18 +55,28 @@ export default function Projects() {
       setGithubUrl("");
       setFile(null);
 
-      // Simulate analysis
-      setTimeout(async () => {
-        await supabase.from("projects").update({
-          framework: "React",
-          project_type: "frontend",
-          build_command: "npm run build",
-          output_dir: "dist",
-          status: "ready",
-        }).eq("id", data.id);
+      // Trigger real analysis via edge function
+      const { data: analysisData } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "analyze", projectId: data.id },
+      });
+
+      if (analysisData?.success) {
         load();
-        toast.success(`Project "${name}" is ready to deploy!`);
-      }, 3000);
+        toast.success(`Project "${name}" analysis complete — ${analysisData.projectType || "ready"}!`);
+      } else {
+        // Fallback simulated analysis
+        setTimeout(async () => {
+          await supabase.from("projects").update({
+            framework: "React",
+            project_type: "frontend",
+            build_command: "npm run build",
+            output_dir: "dist",
+            status: "ready",
+          }).eq("id", data.id);
+          load();
+          toast.success(`Project "${name}" is ready to deploy!`);
+        }, 3000);
+      }
 
       load();
     } catch (err: any) {

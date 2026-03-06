@@ -49,9 +49,24 @@ export default function ProjectDetail() {
         supabase.from("deployments").select("*").eq("project_id", id).order("created_at", { ascending: false }),
       ]);
       setProject(pRes.data);
-      setConnections(cRes.data || []);
+      const conns = cRes.data || [];
+      setConnections(conns);
       setDeployments(dRes.data || []);
-      if (cRes.data?.[0]) setSelectedConnection(cRes.data[0].id);
+
+      // Auto-select appropriate connection based on project type
+      const proj = pRes.data;
+      if (proj && conns.length > 0) {
+        const isBackend = proj.project_type === "backend" || proj.project_type === "fullstack";
+        const renderConn = conns.find((c: any) => c.provider === "render");
+        const vercelConn = conns.find((c: any) => c.provider === "vercel");
+        if (isBackend && renderConn) {
+          setSelectedConnection(renderConn.id);
+        } else if (!isBackend && vercelConn) {
+          setSelectedConnection(vercelConn.id);
+        } else if (conns[0]) {
+          setSelectedConnection(conns[0].id);
+        }
+      }
     };
     load();
 
@@ -295,6 +310,32 @@ export default function ProjectDetail() {
                 <p className="text-sm font-mono font-medium">{item.value}</p>
               </div>
             ))}
+          </div>
+
+          {/* How to run / deploy guidance */}
+          <div className="mt-4 bg-muted/30 rounded-lg p-4 border border-border/50">
+            <h4 className="text-sm font-semibold mb-2">📋 How to Deploy</h4>
+            {project.project_type === "backend" ? (
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>• This is a <strong>backend</strong> project — deploy with <strong>Render</strong></p>
+                <p>• Render will auto-detect your runtime ({project.framework || "Node.js"})</p>
+                <p>• Your app will be live at <code className="bg-muted px-1 rounded">your-name.onrender.com</code></p>
+                <p>• Make sure your server listens on <code className="bg-muted px-1 rounded">$PORT</code> (Render injects it)</p>
+              </div>
+            ) : project.project_type === "fullstack" ? (
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>• This is a <strong>fullstack</strong> project with both frontend & backend</p>
+                <p>• Deploy frontend to <strong>Vercel</strong> and backend to <strong>Render</strong></p>
+                <p>• Select the appropriate connection below for each deployment</p>
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>• This is a <strong>frontend</strong> project — deploy with <strong>Vercel</strong></p>
+                <p>• Build: <code className="bg-muted px-1 rounded">{project.build_command || "npm run build"}</code></p>
+                <p>• Output: <code className="bg-muted px-1 rounded">{project.output_dir || "dist"}</code></p>
+                <p>• Your app will be live at <code className="bg-muted px-1 rounded">your-name.vercel.app</code></p>
+              </div>
+            )}
           </div>
         </div>
 
