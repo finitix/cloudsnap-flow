@@ -476,6 +476,16 @@ export default function ProjectDetail() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
+                      {d.status === "live" && d.provider === "render" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUpdateEnvVars(d.id)}
+                          className="text-xs"
+                        >
+                          <Settings2 className="h-3 w-3 mr-1" />Update Env Vars
+                        </Button>
+                      )}
                       {d.status === "live" && (
                         <Button
                           variant="outline"
