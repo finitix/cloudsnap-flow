@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProjectDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [project, setProject] = useState<any>(null);
   const [connections, setConnections] = useState<any[]>([]);
   const [selectedConnection, setSelectedConnection] = useState("");
@@ -24,6 +26,7 @@ export default function ProjectDetail() {
   const [projectSubdomain, setProjectSubdomain] = useState("");
   const [domainAvailable, setDomainAvailable] = useState<boolean | null>(null);
   const [checkingDomain, setCheckingDomain] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -201,7 +204,35 @@ export default function ProjectDetail() {
     }
   };
 
-  if (!project) return <DashboardLayout><div className="p-8 text-muted-foreground">Loading...</div></DashboardLayout>;
+
+  const handleDeleteProject = async () => {
+    if (!project || !user) return;
+    setDeletingProject(true);
+    try {
+      // Delete all deployments for this project
+      await supabase.from("deployments").delete().eq("project_id", project.id);
+
+      // Delete storage files for this project
+      const { data: files } = await supabase.storage.from("project-uploads").list(`${user.id}`);
+      if (files?.length) {
+        const projectFiles = files.filter((f) => f.name.includes(project.id) || f.name.includes(project.name));
+        if (projectFiles.length > 0) {
+          await supabase.storage.from("project-uploads").remove(projectFiles.map((f) => `${user.id}/${f.name}`));
+        }
+      }
+
+      // Delete the project itself
+      const { error } = await supabase.from("projects").delete().eq("id", project.id);
+      if (error) throw error;
+
+      toast.success("Project deleted permanently.");
+      navigate("/projects");
+    } catch (err: any) {
+      toast.error("Failed to delete project: " + err.message);
+    } finally {
+      setDeletingProject(false);
+    }
+  };
 
   const conn = getConn();
   const providerSuffix = getProviderDomain();
@@ -221,6 +252,28 @@ export default function ProjectDetail() {
               {project.framework || "Unknown"} • {project.project_type || "Detecting..."} • {project.source_type}
             </p>
           </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={deletingProject}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                {deletingProject ? "Deleting..." : "Delete Project"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete "{project.name}" permanently?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete the project, all its deployments, and associated files. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Delete Forever
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
 
         {/* Analysis */}
