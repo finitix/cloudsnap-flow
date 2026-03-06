@@ -226,28 +226,35 @@ export default function ProjectDetail() {
     if (!project || !user) return;
     setDeletingProject(true);
     try {
-      // Delete all deployments for this project
-      await supabase.from("deployments").delete().eq("project_id", project.id);
-
-      // Delete storage files for this project
-      const { data: files } = await supabase.storage.from("project-uploads").list(`${user.id}`);
-      if (files?.length) {
-        const projectFiles = files.filter((f) => f.name.includes(project.id) || f.name.includes(project.name));
-        if (projectFiles.length > 0) {
-          await supabase.storage.from("project-uploads").remove(projectFiles.map((f) => `${user.id}/${f.name}`));
-        }
-      }
-
-      // Delete the project itself
-      const { error } = await supabase.from("projects").delete().eq("id", project.id);
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "delete-project", projectId: project.id, userId: user.id },
+      });
       if (error) throw error;
-
+      if (!data?.success) throw new Error("Delete failed");
       toast.success("Project deleted permanently.");
       navigate("/projects");
     } catch (err: any) {
       toast.error("Failed to delete project: " + err.message);
     } finally {
       setDeletingProject(false);
+    }
+  };
+
+  const handleUpdateEnvVars = async (depId: string) => {
+    const validVars = envVars.filter((e) => e.key && e.value);
+    if (validVars.length === 0) {
+      toast.error("Add at least one valid environment variable.");
+      return;
+    }
+    try {
+      const { data, error } = await supabase.functions.invoke("deploy-project", {
+        body: { action: "update-env-vars", deploymentId: depId, envVars: validVars },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Update failed");
+      toast.success("Environment variables updated!");
+    } catch (err: any) {
+      toast.error("Failed to update env vars: " + err.message);
     }
   };
 
@@ -469,6 +476,16 @@ export default function ProjectDetail() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
+                      {d.status === "live" && d.provider === "render" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUpdateEnvVars(d.id)}
+                          className="text-xs"
+                        >
+                          <Settings2 className="h-3 w-3 mr-1" />Update Env Vars
+                        </Button>
+                      )}
                       {d.status === "live" && (
                         <Button
                           variant="outline"
