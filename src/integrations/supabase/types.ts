@@ -44,6 +44,101 @@ export type Database = {
         }
         Relationships: []
       }
+      deployment_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string
+          deployment_id: string
+          id: string
+          is_read: boolean
+          message: string
+          project_id: string
+          user_id: string
+        }
+        Insert: {
+          alert_type?: string
+          created_at?: string
+          deployment_id: string
+          id?: string
+          is_read?: boolean
+          message: string
+          project_id: string
+          user_id: string
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string
+          deployment_id?: string
+          id?: string
+          is_read?: boolean
+          message?: string
+          project_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deployment_alerts_deployment_id_fkey"
+            columns: ["deployment_id"]
+            isOneToOne: false
+            referencedRelation: "deployments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deployment_alerts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deployment_heal_logs: {
+        Row: {
+          attempt_number: number
+          created_at: string
+          deployment_id: string
+          error_category: string
+          error_message: string | null
+          fix_applied: string | null
+          fix_details: Json | null
+          id: string
+          result: string
+          user_id: string
+        }
+        Insert: {
+          attempt_number?: number
+          created_at?: string
+          deployment_id: string
+          error_category?: string
+          error_message?: string | null
+          fix_applied?: string | null
+          fix_details?: Json | null
+          id?: string
+          result?: string
+          user_id: string
+        }
+        Update: {
+          attempt_number?: number
+          created_at?: string
+          deployment_id?: string
+          error_category?: string
+          error_message?: string | null
+          fix_applied?: string | null
+          fix_details?: Json | null
+          id?: string
+          result?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deployment_heal_logs_deployment_id_fkey"
+            columns: ["deployment_id"]
+            isOneToOne: false
+            referencedRelation: "deployments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deployments: {
         Row: {
           cloud_connection_id: string | null
@@ -52,11 +147,14 @@ export type Database = {
           deploy_id: string | null
           error_message: string | null
           id: string
+          last_error_category: string | null
           live_url: string | null
           logs: string | null
+          max_retries: number
           memory_usage: number | null
           project_id: string
           provider: string
+          retry_count: number
           status: string
           updated_at: string
           user_id: string
@@ -68,11 +166,14 @@ export type Database = {
           deploy_id?: string | null
           error_message?: string | null
           id?: string
+          last_error_category?: string | null
           live_url?: string | null
           logs?: string | null
+          max_retries?: number
           memory_usage?: number | null
           project_id: string
           provider: string
+          retry_count?: number
           status?: string
           updated_at?: string
           user_id: string
@@ -84,11 +185,14 @@ export type Database = {
           deploy_id?: string | null
           error_message?: string | null
           id?: string
+          last_error_category?: string | null
           live_url?: string | null
           logs?: string | null
+          max_retries?: number
           memory_usage?: number | null
           project_id?: string
           provider?: string
+          retry_count?: number
           status?: string
           updated_at?: string
           user_id?: string
