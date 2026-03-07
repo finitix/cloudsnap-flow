@@ -588,14 +588,23 @@ async function deployToVercel(
   await appendLog(`All ${files.length} files uploaded ✓`);
 
   const deployPayload: any = { name: projectName, project: projectName, files: fileEntries, target: "production" };
-  if (needsBuild) {
-    deployPayload.projectSettings = {
-      buildCommand: buildCommand || "npm run build",
-      outputDirectory: outputDir || "dist",
-      framework: framework?.toLowerCase()?.includes("react") ? "vite" : framework?.toLowerCase() === "next.js" ? "nextjs" : null,
-      installCommand: "npm install --legacy-peer-deps",
-    };
-  }
+  
+  // Always include projectSettings — Vercel requires it for new projects
+  const fwLower = (framework || "").toLowerCase();
+  let vercelFramework: string | null = null;
+  if (fwLower.includes("next")) vercelFramework = "nextjs";
+  else if (fwLower.includes("vite") || fwLower.includes("react")) vercelFramework = "vite";
+  else if (fwLower.includes("nuxt")) vercelFramework = "nuxtjs";
+  else if (fwLower.includes("vue")) vercelFramework = "vue";
+  else if (fwLower.includes("svelte")) vercelFramework = "svelte";
+  else if (fwLower.includes("angular")) vercelFramework = "angular";
+
+  deployPayload.projectSettings = {
+    buildCommand: needsBuild ? (buildCommand || "npm run build") : null,
+    outputDirectory: outputDir || (needsBuild ? "dist" : "."),
+    framework: vercelFramework,
+    installCommand: needsBuild ? "npm install --legacy-peer-deps" : null,
+  };
 
   let dr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
