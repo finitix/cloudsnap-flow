@@ -142,9 +142,15 @@ export type Database = {
       }
       projects: {
         Row: {
+          backend_build_command: string | null
+          backend_framework: string | null
+          backend_start_command: string | null
           build_command: string | null
           created_at: string
           framework: string | null
+          frontend_build_command: string | null
+          frontend_framework: string | null
+          frontend_output_dir: string | null
           github_url: string | null
           id: string
           name: string
@@ -156,9 +162,15 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          backend_build_command?: string | null
+          backend_framework?: string | null
+          backend_start_command?: string | null
           build_command?: string | null
           created_at?: string
           framework?: string | null
+          frontend_build_command?: string | null
+          frontend_framework?: string | null
+          frontend_output_dir?: string | null
           github_url?: string | null
           id?: string
           name: string
@@ -170,9 +182,15 @@ export type Database = {
           user_id: string
         }
         Update: {
+          backend_build_command?: string | null
+          backend_framework?: string | null
+          backend_start_command?: string | null
           build_command?: string | null
           created_at?: string
           framework?: string | null
+          frontend_build_command?: string | null
+          frontend_framework?: string | null
+          frontend_output_dir?: string | null
           github_url?: string | null
           id?: string
           name?: string

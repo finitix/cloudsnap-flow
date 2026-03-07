@@ -64,7 +64,24 @@ function detectBuildNeeded(files: ExtractedFile[]): boolean {
   return files.some((f) => f.path === "package.json" || f.path === "requirements.txt" || f.path === "Cargo.toml");
 }
 
-function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasBackend: boolean; framework: string; buildCommand: string; outputDir: string; startCommand: string } {
+interface StackAnalysis {
+  hasFrontend: boolean;
+  hasBackend: boolean;
+  framework: string;
+  buildCommand: string;
+  outputDir: string;
+  startCommand: string;
+  frontendFramework: string;
+  frontendBuildCommand: string;
+  frontendOutputDir: string;
+  backendFramework: string;
+  backendBuildCommand: string;
+  backendStartCommand: string;
+  needsUserInput: boolean;
+  missingInfo: string[];
+}
+
+function detectProjectType(files: ExtractedFile[]): StackAnalysis {
   const fileNames = files.map((f) => f.path.toLowerCase());
   const hasPackageJson = fileNames.includes("package.json");
   const hasIndexHtml = fileNames.includes("index.html");
@@ -82,53 +99,87 @@ function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasB
   const hasFrontend = hasIndexHtml || hasTsx || hasVue || hasViteConfig;
   const hasBackend = hasPython || hasGo || hasRuby || hasDocker || hasProcfile || hasServerFile || hasNextConfig;
 
-  let framework = "Unknown";
-  let buildCommand = "npm run build";
-  let outputDir = "dist";
-  let startCommand = "npm start";
+  // Detect frontend stack
+  let frontendFramework = "Unknown";
+  let frontendBuildCommand = "npm run build";
+  let frontendOutputDir = "dist";
+
+  if (hasViteConfig && hasTsx) { frontendFramework = "React (Vite)"; }
+  else if (hasTsx) { frontendFramework = "React"; }
+  else if (hasVue) { frontendFramework = "Vue"; }
+  else if (hasIndexHtml) { frontendFramework = "Static HTML"; frontendBuildCommand = ""; frontendOutputDir = "."; }
+
+  // Detect backend stack
+  let backendFramework = "Unknown";
+  let backendBuildCommand = "npm install";
+  let backendStartCommand = "npm start";
 
   if (hasNextConfig) {
-    framework = "Next.js"; buildCommand = "npm run build"; outputDir = ".next"; startCommand = "npm start";
-  } else if (hasViteConfig && hasTsx) {
-    framework = "React"; buildCommand = "npm run build"; outputDir = "dist";
-  } else if (hasVue) {
-    framework = "Vue"; buildCommand = "npm run build"; outputDir = "dist";
-  } else if (hasTsx) {
-    framework = "React";
+    backendFramework = "Next.js"; backendBuildCommand = "npm run build"; backendStartCommand = "npm start";
+    frontendFramework = "Next.js"; frontendOutputDir = ".next";
   } else if (hasPython) {
-    framework = "Python"; buildCommand = "pip install -r requirements.txt"; outputDir = "";
-    startCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
+    backendFramework = "Python"; backendBuildCommand = "pip install -r requirements.txt";
+    backendStartCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
   } else if (hasGo) {
-    framework = "Go"; buildCommand = "go build -o main ."; startCommand = "./main";
+    backendFramework = "Go"; backendBuildCommand = "go build -o main ."; backendStartCommand = "./main";
   } else if (hasRuby) {
-    framework = "Ruby"; buildCommand = "bundle install"; startCommand = "bundle exec rails server -p $PORT";
+    backendFramework = "Ruby"; backendBuildCommand = "bundle install"; backendStartCommand = "bundle exec rails server -p $PORT";
   } else if (hasDocker) {
-    framework = "Docker"; buildCommand = ""; startCommand = "";
+    backendFramework = "Docker"; backendBuildCommand = ""; backendStartCommand = "";
   } else if (hasServerFile) {
-    framework = "Node.js"; buildCommand = "npm install"; startCommand = "node server.js";
-  } else if (hasPackageJson) {
-    framework = "Node.js";
-  } else if (hasIndexHtml) {
-    framework = "Static HTML"; buildCommand = ""; outputDir = ".";
+    backendFramework = "Node.js";
+    const entryFile = ["server.js", "server.ts", "app.js", "app.ts"].find((f) => fileNames.includes(f)) || "server.js";
+    backendStartCommand = `node ${entryFile}`;
+    backendBuildCommand = "npm install";
   }
 
+  // Check package.json for more info
   const pkgFile = files.find((f) => f.path === "package.json");
   if (pkgFile) {
     try {
       const pkgJson = JSON.parse(new TextDecoder().decode(pkgFile.data));
       const deps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
-      if (deps["next"]) { framework = "Next.js"; outputDir = ".next"; }
-      else if (deps["react"]) { framework = "React"; }
-      else if (deps["vue"]) { framework = "Vue"; }
-      else if (deps["svelte"]) { framework = "Svelte"; }
-      else if (deps["express"] || deps["fastify"] || deps["koa"] || deps["hapi"]) {
-        framework = "Node.js";
-        if (!hasFrontend) startCommand = pkgJson.scripts?.start ? "npm start" : "node server.js";
+      if (deps["next"]) { frontendFramework = "Next.js"; backendFramework = "Next.js"; frontendOutputDir = ".next"; }
+      else if (deps["react"]) { frontendFramework = "React"; }
+      else if (deps["vue"]) { frontendFramework = "Vue"; }
+      else if (deps["svelte"]) { frontendFramework = "Svelte"; }
+      if (deps["express"] || deps["fastify"] || deps["koa"] || deps["hapi"]) {
+        backendFramework = `Node.js (${deps["express"] ? "Express" : deps["fastify"] ? "Fastify" : deps["koa"] ? "Koa" : "Hapi"})`;
+        if (pkgJson.scripts?.start) backendStartCommand = "npm start";
       }
+      if (pkgJson.scripts?.build && hasFrontend) frontendBuildCommand = "npm run build";
     } catch {}
   }
 
-  return { hasFrontend, hasBackend, framework, buildCommand, outputDir, startCommand };
+  // Determine what info is missing
+  const missingInfo: string[] = [];
+  if (hasBackend && !hasServerFile && !hasPython && !hasGo && !hasRuby && !hasDocker && !hasNextConfig) {
+    missingInfo.push("start_command");
+  }
+  if (hasBackend && backendStartCommand === "npm start" && !pkgFile) {
+    missingInfo.push("start_command");
+  }
+
+  // Primary framework for backward compat
+  let framework = hasFrontend ? frontendFramework : backendFramework;
+  if (framework === "Unknown" && hasBackend) framework = backendFramework;
+
+  return {
+    hasFrontend,
+    hasBackend,
+    framework,
+    buildCommand: hasFrontend ? frontendBuildCommand : backendBuildCommand,
+    outputDir: frontendOutputDir,
+    startCommand: backendStartCommand,
+    frontendFramework: hasFrontend ? frontendFramework : "",
+    frontendBuildCommand: hasFrontend ? frontendBuildCommand : "",
+    frontendOutputDir: hasFrontend ? frontendOutputDir : "",
+    backendFramework: hasBackend ? backendFramework : "",
+    backendBuildCommand: hasBackend ? backendBuildCommand : "",
+    backendStartCommand: hasBackend ? backendStartCommand : "",
+    needsUserInput: missingInfo.length > 0,
+    missingInfo,
+  };
 }
 
 async function downloadGitHubRepoZip(githubUrl: string): Promise<ArrayBuffer> {
@@ -825,9 +876,21 @@ serve(async (req) => {
         project_type: projectType,
         build_command: analysis.buildCommand || "npm run build",
         output_dir: analysis.outputDir || "dist",
+        frontend_framework: analysis.frontendFramework || null,
+        frontend_build_command: analysis.frontendBuildCommand || null,
+        frontend_output_dir: analysis.frontendOutputDir || null,
+        backend_framework: analysis.backendFramework || null,
+        backend_build_command: analysis.backendBuildCommand || null,
+        backend_start_command: analysis.backendStartCommand || null,
       }).eq("id", analyzeProjectId);
 
-      return json({ success: true, projectType, framework: analysis.framework, hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend });
+      return json({
+        success: true, projectType, framework: analysis.framework,
+        hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend,
+        frontendFramework: analysis.frontendFramework, backendFramework: analysis.backendFramework,
+        backendStartCommand: analysis.backendStartCommand,
+        needsUserInput: analysis.needsUserInput, missingInfo: analysis.missingInfo,
+      });
     }
 
     // ── Check project-name availability ──
@@ -1050,8 +1113,99 @@ serve(async (req) => {
   } catch (error: any) {
     console.error("Deployment error:", error);
     if (deploymentId) {
-      const { data: cur } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
+      // Auto-heal: check retry count and retry automatically
+      const { data: dep } = await supabase.from("deployments").select("*").eq("id", deploymentId).single();
+      const currentLogs = dep?.logs || "";
+      const retryMatch = currentLogs.match(/\[AUTO-HEAL\] Retry (\d+)/g);
+      const retryCount = retryMatch ? retryMatch.length : 0;
+      const MAX_RETRIES = 3;
+
+      if (retryCount < MAX_RETRIES) {
+        const ts = new Date().toISOString().slice(11, 19);
+        const retryNum = retryCount + 1;
+        const waitSec = retryNum * 10; // 10s, 20s, 30s backoff
+        await supabase.from("deployments").update({
+          status: "building",
+          error_message: null,
+          logs: currentLogs + `[${ts}] ⚠️ Error: ${error.message}\n[${ts}] [AUTO-HEAL] Retry ${retryNum}/${MAX_RETRIES} — waiting ${waitSec}s before retrying...\n`,
+        }).eq("id", deploymentId);
+
+        // Wait with backoff
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+
+        // Re-invoke this function for retry
+        try {
+          const retryBody: any = { deploymentId };
+          // Get the original deployment info to reconstruct the call
+          const { data: retryDep } = await supabase.from("deployments").select("*, projects(*), cloud_connections(*)").eq("id", deploymentId).single();
+          if (retryDep) {
+            const retryProject = (retryDep as any).projects;
+            const retryConn = (retryDep as any).cloud_connections;
+            if (retryProject && retryConn) {
+              // Perform inline retry instead of re-invoking
+              const retryAppendLog = async (log: string, extra?: Record<string, any>) => {
+                const { data: cur2 } = await supabase.from("deployments").select("logs").eq("id", deploymentId!).single();
+                const ts2 = new Date().toISOString().slice(11, 19);
+                await supabase.from("deployments").update({
+                  logs: (cur2?.logs || "") + `[${ts2}] ${log}\n`,
+                  ...extra,
+                }).eq("id", deploymentId!);
+              };
+
+              await retryAppendLog(`[AUTO-HEAL] Starting retry ${retryNum}...`);
+
+              let retryFiles: ExtractedFile[] = [];
+              if (retryProject.source_type === "github" && retryProject.github_url) {
+                const zipBuf = await downloadGitHubRepoZip(retryProject.github_url);
+                retryFiles = extractZipFilesRaw(zipBuf);
+              } else if (retryProject.source_type === "zip") {
+                const { data: fList } = await supabase.storage.from("project-uploads").list(retryProject.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
+                if (fList && fList.length > 0) {
+                  const fp = `${retryProject.user_id}/${fList[0].name}`;
+                  const { data: fd } = await supabase.storage.from("project-uploads").download(fp);
+                  if (fd) retryFiles = extractZipFilesRaw(await fd.arrayBuffer());
+                }
+              }
+
+              if (retryFiles.length > 0) {
+                const nb = detectBuildNeeded(retryFiles);
+                const sub = retryDep.live_url
+                  ? retryDep.live_url.replace(/^https?:\/\//, "").replace(/\.(vercel\.app|onrender\.com).*$/, "")
+                  : retryProject.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+                let retryResult: { deployId: string; liveUrl: string };
+                if (retryConn.provider === "vercel") {
+                  retryResult = await deployToVercel(retryConn.token, sub, retryFiles, nb, retryProject.build_command, retryProject.output_dir, retryProject.framework, retryAppendLog);
+                } else if (retryConn.provider === "render") {
+                  retryResult = await deployToRender(retryConn.token, sub, retryProject.github_url, retryFiles, retryAppendLog);
+                } else {
+                  throw new Error("Unsupported provider");
+                }
+
+                await retryAppendLog(`[AUTO-HEAL] Retry ${retryNum} succeeded! ✅`, { status: "live", live_url: retryResult.liveUrl, deploy_id: retryResult.deployId });
+                await supabase.from("projects").update({ status: "live" }).eq("id", retryProject.id);
+                return json({ success: true, url: retryResult.liveUrl, autoHealed: true, retryCount: retryNum });
+              }
+            }
+          }
+        } catch (retryErr: any) {
+          // Retry also failed — fall through to mark as error
+          const ts2 = new Date().toISOString().slice(11, 19);
+          const { data: cur3 } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
+          if (retryCount + 1 >= MAX_RETRIES) {
+            await supabase.from("deployments").update({
+              status: "error",
+              error_message: `Failed after ${MAX_RETRIES} auto-heal retries: ${retryErr.message}`,
+              logs: (cur3?.logs || "") + `[${ts2}] [AUTO-HEAL] Retry ${retryCount + 1} failed: ${retryErr.message}\n[${ts2}] ❌ All ${MAX_RETRIES} auto-heal retries exhausted.\n`,
+            }).eq("id", deploymentId);
+            return json({ success: false, error: `Auto-heal exhausted after ${MAX_RETRIES} retries: ${retryErr.message}` }, 500);
+          }
+        }
+      }
+
+      // No retries left or retry not applicable
       const ts = new Date().toISOString().slice(11, 19);
+      const { data: cur } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
       await supabase.from("deployments").update({
         status: "error",
         error_message: error.message,

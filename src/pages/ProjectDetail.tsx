@@ -357,7 +357,9 @@ export default function ProjectDetail() {
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             <Terminal className="h-4 w-4 text-primary" /> Project Analysis
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+          {/* Overall info */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             {[
               { label: "Framework", value: project.framework || "..." },
               { label: "Type", value: project.project_type || "..." },
@@ -371,12 +373,93 @@ export default function ProjectDetail() {
             ))}
           </div>
 
-          <div className="mt-4 bg-muted/30 rounded-lg p-4 border border-border/50">
+          {/* Separate Frontend & Backend stacks for fullstack projects */}
+          {project.project_type === "fullstack" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* Frontend Stack */}
+              <div className="border border-border/50 rounded-lg p-4 bg-primary/5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Globe className="h-4 w-4 text-primary" />
+                  <h4 className="text-sm font-semibold">Frontend Stack</h4>
+                </div>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Framework</span>
+                    <span className="font-mono font-medium">{project.frontend_framework || project.framework || "Unknown"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Build Command</span>
+                    <span className="font-mono font-medium">{project.frontend_build_command || project.build_command || "npm run build"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Output Dir</span>
+                    <span className="font-mono font-medium">{project.frontend_output_dir || project.output_dir || "dist"}</span>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-3">Deploy with <strong>Vercel</strong></p>
+              </div>
+
+              {/* Backend Stack */}
+              <div className="border border-border/50 rounded-lg p-4 bg-accent/5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Server className="h-4 w-4 text-primary" />
+                  <h4 className="text-sm font-semibold">Backend Stack</h4>
+                </div>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Framework</span>
+                    <span className="font-mono font-medium">{project.backend_framework || "Unknown"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Build Command</span>
+                    <span className="font-mono font-medium">{project.backend_build_command || "npm install"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Start Command</span>
+                    <span className="font-mono font-medium">{project.backend_start_command || "npm start"}</span>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-3">Deploy with <strong>Render</strong></p>
+              </div>
+            </div>
+          )}
+
+          {/* Missing info prompt */}
+          {project.project_type === "fullstack" && !project.backend_start_command && (
+            <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 mb-4">
+              <p className="text-sm font-semibold text-warning mb-2">⚠️ Missing Configuration</p>
+              <p className="text-xs text-muted-foreground mb-3">
+                We couldn't auto-detect the start command for your backend. Please provide it below so we can deploy correctly.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Start Command (required for backend)</Label>
+                  <Input
+                    value={customStartCommand}
+                    onChange={(e) => setCustomStartCommand(e.target.value)}
+                    placeholder="e.g. node server.js, python main.py"
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Build Command</Label>
+                  <Input
+                    value={customBuildCommand}
+                    onChange={(e) => setCustomBuildCommand(e.target.value)}
+                    placeholder="e.g. npm install, pip install -r requirements.txt"
+                    className="font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-muted/30 rounded-lg p-4 border border-border/50">
             <h4 className="text-sm font-semibold mb-2">📋 How to Deploy</h4>
             {project.project_type === "backend" ? (
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>• This is a <strong>backend</strong> project — deploy with <strong>Render</strong></p>
-                <p>• Render will auto-detect your runtime ({project.framework || "Node.js"})</p>
+                <p>• Render will auto-detect your runtime ({project.backend_framework || project.framework || "Node.js"})</p>
                 <p>• Your app will be live at <code className="bg-muted px-1 rounded">your-name.onrender.com</code></p>
                 <p>• Make sure your server listens on <code className="bg-muted px-1 rounded">$PORT</code> (Render injects it)</p>
                 <p>• ⚠️ Free Render services spin down after inactivity — first request may take ~50s</p>
@@ -384,8 +467,10 @@ export default function ProjectDetail() {
             ) : project.project_type === "fullstack" ? (
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>• This is a <strong>fullstack</strong> project with both frontend & backend</p>
-                <p>• Deploy frontend to <strong>Vercel</strong> and backend to <strong>Render</strong></p>
-                <p>• Select the appropriate connection below for each deployment</p>
+                <p>• Frontend ({project.frontend_framework || "React"}) → Deploy to <strong>Vercel</strong></p>
+                <p>• Backend ({project.backend_framework || "Node.js"}) → Deploy to <strong>Render</strong></p>
+                <p>• Deploy each part separately using the appropriate connection below</p>
+                <p>• 💡 Set backend URL as an env var in your frontend for API calls</p>
               </div>
             ) : (
               <div className="text-xs text-muted-foreground space-y-1">
