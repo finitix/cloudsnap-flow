@@ -67,9 +67,11 @@ interface StackAnalysis {
   frontendFramework: string;
   frontendBuildCommand: string;
   frontendOutputDir: string;
+  frontendRootDir: string;
   backendFramework: string;
   backendBuildCommand: string;
   backendStartCommand: string;
+  backendRootDir: string;
   needsUserInput: boolean;
   missingInfo: string[];
   detectedFiles: { frontend: string[]; backend: string[] };
@@ -79,12 +81,10 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
   const allPaths = files.map((f) => f.path.toLowerCase());
   const allNames = files.map((f) => f.path);
 
-  // Helper: check if file exists in root or any subfolder
   const hasFile = (name: string) => allPaths.some((p) => p === name || p.endsWith("/" + name));
   const hasFileInDir = (dir: string, name: string) => allPaths.some((p) => p.startsWith(dir.toLowerCase() + "/") && p.endsWith("/" + name) || p === (dir.toLowerCase() + "/" + name));
   const filesInDir = (dir: string) => allNames.filter((p) => p.toLowerCase().startsWith(dir.toLowerCase() + "/"));
 
-  // Detect common directory structures for fullstack projects
   const frontendDirs = ["frontend", "client", "web", "app", "ui", "packages/frontend", "packages/client", "packages/web"];
   const backendDirs = ["backend", "server", "api", "services", "packages/backend", "packages/server", "packages/api"];
 
@@ -93,7 +93,6 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
   const frontendDetectedFiles: string[] = [];
   const backendDetectedFiles: string[] = [];
 
-  // Check for explicit frontend/backend directories
   for (const dir of frontendDirs) {
     const dirFiles = filesInDir(dir);
     if (dirFiles.length > 0) {
@@ -111,7 +110,6 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
     }
   }
 
-  // Root-level detection
   const hasPackageJson = hasFile("package.json");
   const hasIndexHtml = hasFile("index.html");
   const hasTsx = allPaths.some((f) => f.endsWith(".tsx") || f.endsWith(".jsx"));
@@ -131,18 +129,13 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
   const hasAngular = hasFile("angular.json");
   const hasNuxt = hasFile("nuxt.config.ts") || hasFile("nuxt.config.js");
 
-  // Check for monorepo configs
   const hasLerna = hasFile("lerna.json");
   const hasTurbo = hasFile("turbo.json");
   const hasNxJson = hasFile("nx.json");
-  const isMonorepo = hasLerna || hasTurbo || hasNxJson || detectedFrontendDir !== "";
 
-  // Determine frontend presence
   let hasFrontend = hasIndexHtml || hasTsx || hasVue || hasViteConfig || hasAngular || hasSvelte || hasNuxt || detectedFrontendDir !== "";
-  // Determine backend presence
   let hasBackend = hasPython || hasGo || hasRuby || hasDocker || hasProcfile || hasServerFile || hasNextConfig || detectedBackendDir !== "";
 
-  // If we have explicit frontend/backend dirs, that's strong evidence of fullstack
   if (detectedFrontendDir && detectedBackendDir) {
     hasFrontend = true;
     hasBackend = true;
@@ -160,8 +153,8 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
     } catch {}
   }
 
-  // Check for frontend/backend package.json separately
   let frontendPkgDeps: Record<string, string> = {};
+  let frontendPkgScripts: Record<string, string> = {};
   let backendPkgDeps: Record<string, string> = {};
   let backendPkgScripts: Record<string, string> = {};
 
@@ -171,6 +164,7 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
       try {
         const p = JSON.parse(new TextDecoder().decode(fpkg.data));
         frontendPkgDeps = { ...p.dependencies, ...p.devDependencies };
+        frontendPkgScripts = p.scripts || {};
       } catch {}
     }
   }
@@ -185,7 +179,6 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
     }
   }
 
-  // Merge all deps for detection
   const allDeps = { ...rootPkgDeps, ...frontendPkgDeps, ...backendPkgDeps };
 
   // Detect frontend framework
@@ -211,6 +204,7 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
     frontendFramework = "Static HTML"; frontendBuildCommand = ""; frontendOutputDir = ".";
   }
 
+  // For fullstack with frontend subdir, build commands need to cd into it
   if (detectedFrontendDir && frontendBuildCommand === "npm run build") {
     frontendBuildCommand = `cd ${detectedFrontendDir} && npm install && npm run build`;
   }
@@ -254,10 +248,8 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
     else if (backendPkgScripts["dev"]) backendStartCommand = `cd ${detectedBackendDir} && npm run dev`;
   }
 
-  // If we only see backend indicators (express etc) but also have React, it's fullstack
   if (allDeps["express"] && allDeps["react"]) { hasFrontend = true; hasBackend = true; }
 
-  // Missing info detection
   const missingInfo: string[] = [];
   if (hasBackend && backendStartCommand === "npm start" && !rootPkgScripts["start"] && !backendPkgScripts["start"]) {
     missingInfo.push("start_command");
@@ -279,9 +271,11 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
     frontendFramework: hasFrontend ? frontendFramework : "",
     frontendBuildCommand: hasFrontend ? frontendBuildCommand : "",
     frontendOutputDir: hasFrontend ? frontendOutputDir : "",
+    frontendRootDir: detectedFrontendDir,
     backendFramework: hasBackend ? backendFramework : "",
     backendBuildCommand: hasBackend ? backendBuildCommand : "",
     backendStartCommand: hasBackend ? backendStartCommand : "",
+    backendRootDir: detectedBackendDir,
     needsUserInput: missingInfo.length > 0,
     missingInfo,
     detectedFiles: {
@@ -295,7 +289,12 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
 // ── Auto-Heal: Error Analyzer ──
 // ══════════════════════════════════════
 
-type ErrorCategory = "dependency_error" | "build_error" | "port_error" | "env_error" | "missing_files_error" | "timeout_error" | "project_settings_error" | "framework_detection_error" | "permission_error" | "rate_limit_error" | "unknown_error";
+type ErrorCategory =
+  | "dependency_error" | "build_error" | "port_error" | "env_error"
+  | "missing_files_error" | "timeout_error" | "project_settings_error"
+  | "framework_detection_error" | "permission_error" | "rate_limit_error"
+  | "command_not_found_error" | "root_directory_error" | "render_build_error"
+  | "unknown_error";
 
 interface ErrorAnalysis {
   category: ErrorCategory;
@@ -307,9 +306,21 @@ interface ErrorAnalysis {
 function analyzeError(errorMessage: string): ErrorAnalysis {
   const msg = (errorMessage || "").toLowerCase();
 
-  // Vercel missing_project_settings — the #1 issue
-  if (msg.includes("missing_project_settings") || msg.includes("projectsettings") && msg.includes("required")) {
-    // Try to extract suggested framework from the error
+  // ── Exit code 127 = command not found ──
+  if (msg.includes("exited with 127") || msg.includes("exit code 127") || msg.includes("command not found") || msg.includes("not found: ")) {
+    // Extract which command failed
+    const cmdMatch = errorMessage.match(/command\s+"([^"]+)"\s+exited/i) || errorMessage.match(/"([^"]+)"\s+exited with 127/i);
+    const failedCmd = cmdMatch ? cmdMatch[1] : "unknown";
+    return {
+      category: "command_not_found_error",
+      description: `Build command "${failedCmd}" not found — dependencies need to be installed first`,
+      suggestedFix: "Install dependencies before build, ensure installCommand is set correctly",
+      extractedDetails: { failedCommand: failedCmd },
+    };
+  }
+
+  // ── Vercel missing_project_settings ──
+  if (msg.includes("missing_project_settings") || (msg.includes("projectsettings") && msg.includes("required"))) {
     let detectedFramework: string | null = null;
     try {
       const match = errorMessage.match(/"framework"\s*:\s*\{[^}]*"slug"\s*:\s*"?(\w+)"?/);
@@ -323,7 +334,7 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Framework detection / auto-detection confirmation
+  // ── Framework detection / auto-detection ──
   if (msg.includes("skipautodetectionconfirmation") || msg.includes("automatic framework detection")) {
     return {
       category: "framework_detection_error",
@@ -332,7 +343,17 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Permission / auth errors
+  // ── Render build_failed — specific pattern ──
+  if (msg.includes("render deploy failed") || msg.includes("render_build_failed") ||
+      (msg.includes("render") && msg.includes("build_failed"))) {
+    return {
+      category: "render_build_error",
+      description: "Render build failed — likely missing start command, wrong runtime, or dependency issue",
+      suggestedFix: "Fetch Render build logs, re-analyze project structure, fix build/start commands",
+    };
+  }
+
+  // ── Permission / auth errors ──
   if (msg.includes("forbidden") || msg.includes("401") || msg.includes("403") || msg.includes("not_authorized") || msg.includes("invalid_token")) {
     return {
       category: "permission_error",
@@ -341,7 +362,7 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Rate limit
+  // ── Rate limit ──
   if (msg.includes("rate_limit") || msg.includes("too many requests") || msg.includes("429")) {
     return {
       category: "rate_limit_error",
@@ -350,10 +371,10 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Dependency errors
+  // ── Dependency errors ──
   if (msg.includes("module not found") || msg.includes("cannot find module") || msg.includes("npm err") ||
       msg.includes("package not found") || msg.includes("enoent") || msg.includes("missing dependency") ||
-      msg.includes("no such file or directory") && (msg.includes("node_modules") || msg.includes("package"))) {
+      (msg.includes("no such file or directory") && (msg.includes("node_modules") || msg.includes("package")))) {
     return {
       category: "dependency_error",
       description: "Missing or failed dependency installation",
@@ -361,21 +382,22 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Build errors
-  if (msg.includes("build failed") || msg.includes("compilation error") || msg.includes("syntax error") ||
-      msg.includes("type error") || msg.includes("tsc") || msg.includes("webpack") ||
-      msg.includes("rollup") || msg.includes("vite") && msg.includes("error") ||
-      msg.includes("exit code 1") || msg.includes("command failed")) {
+  // ── Build errors (but NOT exit 127, which is command_not_found) ──
+  if ((msg.includes("build failed") || msg.includes("compilation error") || msg.includes("syntax error") ||
+       msg.includes("type error") || msg.includes("tsc") || msg.includes("webpack") ||
+       msg.includes("rollup") || (msg.includes("vite") && msg.includes("error")) ||
+       msg.includes("exit code 1") || msg.includes("command failed")) &&
+      !msg.includes("exited with 127")) {
     return {
       category: "build_error",
       description: "Build process failed",
-      suggestedFix: "Retry build step with clean cache",
+      suggestedFix: "Retry build step with CI=false and clean install",
     };
   }
 
-  // Port errors
-  if (msg.includes("eaddrinuse") || msg.includes("port") && (msg.includes("already in use") || msg.includes("not available")) ||
-      msg.includes("listen") && msg.includes("error") || msg.includes("wrong port")) {
+  // ── Port errors ──
+  if (msg.includes("eaddrinuse") || (msg.includes("port") && (msg.includes("already in use") || msg.includes("not available"))) ||
+      (msg.includes("listen") && msg.includes("error")) || msg.includes("wrong port")) {
     return {
       category: "port_error",
       description: "Port conflict or misconfiguration",
@@ -383,10 +405,10 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Environment variable errors
-  if (msg.includes("env") && (msg.includes("missing") || msg.includes("undefined") || msg.includes("not set")) ||
-      msg.includes("environment variable") || msg.includes("config") && msg.includes("not found") ||
-      msg.includes("api_key") || msg.includes("secret") && msg.includes("missing")) {
+  // ── Environment variable errors ──
+  if ((msg.includes("env") && (msg.includes("missing") || msg.includes("undefined") || msg.includes("not set"))) ||
+      msg.includes("environment variable") || (msg.includes("config") && msg.includes("not found")) ||
+      msg.includes("api_key") || (msg.includes("secret") && msg.includes("missing"))) {
     return {
       category: "env_error",
       description: "Missing environment variable or configuration",
@@ -394,7 +416,7 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Missing files (Vercel specific)
+  // ── Missing files (Vercel specific) ──
   if (msg.includes("missing_files") || msg.includes("missing files")) {
     return {
       category: "missing_files_error",
@@ -403,7 +425,7 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     };
   }
 
-  // Timeout errors
+  // ── Timeout errors ──
   if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("deadline exceeded")) {
     return {
       category: "timeout_error",
@@ -415,8 +437,92 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
   return {
     category: "unknown_error",
     description: "Unknown deployment error",
-    suggestedFix: "Retry deployment once",
+    suggestedFix: "Analyze error with AI and retry",
   };
+}
+
+// ══════════════════════════════════════
+// ── AI-Powered Error Analysis ──
+// ══════════════════════════════════════
+
+async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Promise<ErrorAnalysis> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) {
+    return analyzeError(errorMessage); // fallback to rule-based
+  }
+
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [
+          {
+            role: "system",
+            content: `You are a deployment error analyzer. Given an error message and project context, you must call the analyze_error function with your analysis. Categories: dependency_error, build_error, port_error, env_error, command_not_found_error, root_directory_error, render_build_error, project_settings_error, framework_detection_error, permission_error, rate_limit_error, timeout_error, missing_files_error, unknown_error.`
+          },
+          {
+            role: "user",
+            content: `Error: ${errorMessage.slice(0, 1500)}\n\nProject: framework=${projectContext.framework || "unknown"}, type=${projectContext.project_type || "unknown"}, frontend=${projectContext.frontend_framework || "none"}, backend=${projectContext.backend_framework || "none"}, provider=${projectContext.provider || "unknown"}`
+          }
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "analyze_error",
+            description: "Analyze a deployment error and return category, description, and fix",
+            parameters: {
+              type: "object",
+              properties: {
+                category: {
+                  type: "string",
+                  enum: ["dependency_error", "build_error", "port_error", "env_error", "command_not_found_error", "root_directory_error", "render_build_error", "project_settings_error", "framework_detection_error", "permission_error", "rate_limit_error", "timeout_error", "missing_files_error", "unknown_error"]
+                },
+                description: { type: "string" },
+                suggestedFix: { type: "string" },
+                modifiedBuildCommand: { type: "string" },
+                modifiedStartCommand: { type: "string" },
+                modifiedInstallCommand: { type: "string" },
+              },
+              required: ["category", "description", "suggestedFix"],
+              additionalProperties: false,
+            }
+          }
+        }],
+        tool_choice: { type: "function", function: { name: "analyze_error" } },
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("AI analysis failed:", response.status);
+      return analyzeError(errorMessage);
+    }
+
+    const result = await response.json();
+    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+    if (toolCall?.function?.arguments) {
+      const parsed = JSON.parse(toolCall.function.arguments);
+      return {
+        category: parsed.category as ErrorCategory,
+        description: parsed.description || "AI-analyzed error",
+        suggestedFix: parsed.suggestedFix || "Apply AI-suggested fix",
+        extractedDetails: {
+          aiAnalyzed: true,
+          modifiedBuildCommand: parsed.modifiedBuildCommand,
+          modifiedStartCommand: parsed.modifiedStartCommand,
+          modifiedInstallCommand: parsed.modifiedInstallCommand,
+        },
+      };
+    }
+  } catch (e) {
+    console.error("AI analysis error:", e);
+  }
+
+  return analyzeError(errorMessage);
 }
 
 // ══════════════════════════════════════
@@ -429,21 +535,54 @@ interface FixAction {
   modifiedStartCommand?: string;
   modifiedEnvVars?: Array<{ key: string; value: string }>;
   modifiedOutputDir?: string;
+  modifiedInstallCommand?: string;
+  modifiedRootDir?: string;
   shouldRetry: boolean;
 }
 
-function applyFix(category: ErrorCategory, project: any, files?: ExtractedFile[]): FixAction {
+function applyFix(category: ErrorCategory, project: any, analysis?: StackAnalysis, errorAnalysis?: ErrorAnalysis): FixAction {
   switch (category) {
+    case "command_not_found_error": {
+      // Exit code 127 = binary not found. Need to ensure install runs before build.
+      const failedCmd = errorAnalysis?.extractedDetails?.failedCommand || "";
+      const isFullstack = analysis?.hasFrontend && analysis?.hasBackend;
+      const frontendDir = analysis?.frontendRootDir || "";
+
+      if (failedCmd.includes("vite") || failedCmd.includes("react-scripts") || failedCmd.includes("next")) {
+        // Frontend build tool not found — need npm install first
+        const installCmd = frontendDir
+          ? `cd ${frontendDir} && npm install --legacy-peer-deps`
+          : "npm install --legacy-peer-deps";
+        const buildCmd = frontendDir
+          ? `cd ${frontendDir} && npm run build`
+          : "npm run build";
+        return {
+          fixApplied: `Command "${failedCmd}" not found — install dependencies first, set rootDirectory=${frontendDir || "root"}`,
+          modifiedInstallCommand: installCmd,
+          modifiedBuildCommand: buildCmd,
+          modifiedRootDir: frontendDir || undefined,
+          shouldRetry: true,
+        };
+      }
+
+      // Generic command not found
+      return {
+        fixApplied: `Command "${failedCmd}" not found — reinstall all dependencies`,
+        modifiedInstallCommand: "npm install --legacy-peer-deps",
+        modifiedBuildCommand: "npm install --legacy-peer-deps && npm run build",
+        shouldRetry: true,
+      };
+    }
+
     case "project_settings_error":
     case "framework_detection_error": {
-      // Re-analyze the project to get correct framework settings
-      const analysis = files?.length ? detectProjectType(files) : null;
       const fw = analysis?.frontendFramework || project.frontend_framework || project.framework || "";
       const fwLower = fw.toLowerCase();
       let vercelFramework: string | null = null;
       let buildCmd = "npm run build";
       let outputDir = "dist";
       let installCmd = "npm install --legacy-peer-deps";
+      let rootDir = analysis?.frontendRootDir || undefined;
 
       if (fwLower.includes("next")) { vercelFramework = "nextjs"; outputDir = ".next"; }
       else if (fwLower.includes("vite") || fwLower.includes("react")) { vercelFramework = "vite"; outputDir = "dist"; }
@@ -454,26 +593,71 @@ function applyFix(category: ErrorCategory, project: any, files?: ExtractedFile[]
       else if (fwLower.includes("static")) { vercelFramework = null; buildCmd = ""; outputDir = "."; }
 
       return {
-        fixApplied: `Set projectSettings with framework=${vercelFramework || "auto"}, buildCommand=${buildCmd}, outputDirectory=${outputDir}`,
+        fixApplied: `Set projectSettings: framework=${vercelFramework || "auto"}, build=${buildCmd}, output=${outputDir}, root=${rootDir || "/"}`,
         modifiedBuildCommand: buildCmd,
         modifiedOutputDir: outputDir,
+        modifiedInstallCommand: installCmd,
+        modifiedRootDir: rootDir,
         shouldRetry: true,
         _vercelFramework: vercelFramework,
-        _installCommand: installCmd,
       } as any;
     }
+
+    case "render_build_error": {
+      // Render build failed — re-analyze and fix commands
+      const isFullstack = analysis?.hasFrontend && analysis?.hasBackend;
+      const backendDir = analysis?.backendRootDir || "";
+      let buildCmd = "npm install";
+      let startCmd = "npm start";
+
+      if (backendDir) {
+        buildCmd = `cd ${backendDir} && npm install`;
+        startCmd = `cd ${backendDir} && npm start`;
+      }
+
+      if (analysis?.backendFramework) {
+        const bf = analysis.backendFramework.toLowerCase();
+        if (bf.includes("python")) {
+          buildCmd = backendDir ? `cd ${backendDir} && pip install -r requirements.txt` : "pip install -r requirements.txt";
+          startCmd = backendDir ? `cd ${backendDir} && python main.py` : "python main.py";
+        } else if (bf.includes("express") || bf.includes("node")) {
+          if (backendDir) {
+            buildCmd = `cd ${backendDir} && npm install`;
+            startCmd = `cd ${backendDir} && node server.js`;
+          }
+        }
+      }
+
+      // Override with project-level commands if available
+      if (project.backend_build_command) buildCmd = project.backend_build_command;
+      if (project.backend_start_command) startCmd = project.backend_start_command;
+
+      return {
+        fixApplied: `Fix Render build: buildCommand="${buildCmd}", startCommand="${startCmd}"`,
+        modifiedBuildCommand: buildCmd,
+        modifiedStartCommand: startCmd,
+        modifiedRootDir: backendDir || undefined,
+        shouldRetry: true,
+      };
+    }
+
     case "dependency_error":
       return {
         fixApplied: "Reinstall dependencies with --legacy-peer-deps flag",
+        modifiedInstallCommand: "npm install --legacy-peer-deps",
         modifiedBuildCommand: "npm install --legacy-peer-deps && npm run build",
         shouldRetry: true,
       };
+
     case "build_error":
       return {
-        fixApplied: "Retry build with CI=false to ignore warnings as errors",
+        fixApplied: "Retry build with CI=false, clean install, and --legacy-peer-deps",
+        modifiedInstallCommand: "npm install --legacy-peer-deps",
         modifiedBuildCommand: "CI=false npm run build",
+        modifiedEnvVars: [{ key: "CI", value: "false" }],
         shouldRetry: true,
       };
+
     case "port_error":
       return {
         fixApplied: "Set PORT to 3000 via environment variable",
@@ -481,6 +665,7 @@ function applyFix(category: ErrorCategory, project: any, files?: ExtractedFile[]
         modifiedStartCommand: project.backend_start_command || "npm start",
         shouldRetry: true,
       };
+
     case "env_error":
       return {
         fixApplied: "Inject default NODE_ENV and PORT environment variables",
@@ -490,32 +675,57 @@ function applyFix(category: ErrorCategory, project: any, files?: ExtractedFile[]
         ],
         shouldRetry: true,
       };
+
+    case "root_directory_error": {
+      const rootDir = analysis?.frontendRootDir || analysis?.backendRootDir || "";
+      return {
+        fixApplied: `Set rootDirectory to "${rootDir}"`,
+        modifiedRootDir: rootDir,
+        shouldRetry: true,
+      };
+    }
+
     case "missing_files_error":
       return {
         fixApplied: "Re-upload all files to provider and retry",
         shouldRetry: true,
       };
+
     case "timeout_error":
       return {
         fixApplied: "Retry deployment (timeouts are often transient)",
         shouldRetry: true,
       };
+
     case "rate_limit_error":
       return {
         fixApplied: "Wait 60s for rate limit to reset, then retry",
         shouldRetry: true,
       };
+
     case "permission_error":
       return {
         fixApplied: "Permission error — cannot auto-fix, check API token",
         shouldRetry: false,
       };
+
     case "unknown_error":
-    default:
+    default: {
+      // Use AI-suggested fixes if available
+      if (errorAnalysis?.extractedDetails?.aiAnalyzed) {
+        return {
+          fixApplied: `AI fix: ${errorAnalysis.suggestedFix}`,
+          modifiedBuildCommand: errorAnalysis.extractedDetails.modifiedBuildCommand || undefined,
+          modifiedStartCommand: errorAnalysis.extractedDetails.modifiedStartCommand || undefined,
+          modifiedInstallCommand: errorAnalysis.extractedDetails.modifiedInstallCommand || undefined,
+          shouldRetry: true,
+        };
+      }
       return {
         fixApplied: "Generic retry — re-download source and redeploy",
         shouldRetry: true,
       };
+    }
   }
 }
 
@@ -537,7 +747,8 @@ async function downloadGitHubRepoZip(githubUrl: string): Promise<ArrayBuffer> {
 async function deployToVercel(
   token: string, projectName: string, files: ExtractedFile[], needsBuild: boolean,
   buildCommand: string | null, outputDir: string | null, framework: string | null,
-  appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>
+  appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>,
+  overrides?: { installCommand?: string; rootDirectory?: string; vercelFramework?: string | null; envVars?: Array<{ key: string; value: string }> }
 ): Promise<{ deployId: string; liveUrl: string }> {
   await appendLog("Checking Vercel project...");
   const checkRes = await safeFetchJson(`https://api.vercel.com/v9/projects/${projectName}`, {
@@ -546,20 +757,51 @@ async function deployToVercel(
 
   if (checkRes.status === 404) {
     await appendLog(`Creating Vercel project "${projectName}"...`);
+    // Create project with framework settings so subsequent deploys work
+    const createPayload: any = { name: projectName };
+    if (overrides?.rootDirectory) createPayload.rootDirectory = overrides.rootDirectory;
+    if (overrides?.vercelFramework) createPayload.framework = overrides.vercelFramework;
+
     const createRes = await safeFetchJson("https://api.vercel.com/v10/projects", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: projectName }),
+      body: JSON.stringify(createPayload),
     });
     if (!createRes.ok && createRes.data?.error?.code !== "project_already_exists") {
       await appendLog(`Project create warning: ${JSON.stringify(createRes.data)}`);
     }
+
+    // Add env vars if provided
+    if (overrides?.envVars?.length) {
+      await safeFetchJson(`https://api.vercel.com/v10/projects/${projectName}/env`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(overrides.envVars.map(e => ({
+          key: e.key, value: e.value, target: ["production", "preview", "development"], type: "plain",
+        }))),
+      });
+    }
   }
 
-  await appendLog(`Preparing ${files.length} files...`, { status: "deploying" });
+  // If there's a rootDirectory, filter files to only that subdirectory
+  let deployFiles = files;
+  if (overrides?.rootDirectory) {
+    const rootDir = overrides.rootDirectory;
+    deployFiles = files
+      .filter(f => f.path.startsWith(rootDir + "/"))
+      .map(f => ({ ...f, path: f.path.slice(rootDir.length + 1) }));
+    if (deployFiles.length === 0) {
+      await appendLog(`⚠️ No files found in rootDirectory "${rootDir}", using all files`);
+      deployFiles = files;
+    } else {
+      await appendLog(`📁 Using ${deployFiles.length} files from "${rootDir}/" subdirectory`);
+    }
+  }
+
+  await appendLog(`Preparing ${deployFiles.length} files...`, { status: "deploying" });
   const fileShaMap: Map<string, ExtractedFile> = new Map();
   const fileEntries: Array<{ file: string; sha: string; size: number }> = [];
-  for (const f of files) {
+  for (const f of deployFiles) {
     const sha = await sha1Hex(f.data);
     fileShaMap.set(sha, f);
     fileEntries.push({ file: f.path, sha, size: f.data.length });
@@ -579,31 +821,33 @@ async function deployToVercel(
     } catch { return false; }
   }
 
-  // Bulk upload
   const batchSize = 10;
-  for (let i = 0; i < files.length; i += batchSize) {
-    const batch = files.slice(i, i + batchSize);
+  for (let i = 0; i < deployFiles.length; i += batchSize) {
+    const batch = deployFiles.slice(i, i + batchSize);
     await Promise.all(batch.map(async (f) => { await uploadFileBySha(await sha1Hex(f.data)); }));
   }
-  await appendLog(`All ${files.length} files uploaded ✓`);
+  await appendLog(`All ${deployFiles.length} files uploaded ✓`);
 
-  const deployPayload: any = { name: projectName, project: projectName, files: fileEntries, target: "production" };
-  
-  // Always include projectSettings — Vercel requires it for new projects
+  // Build deploy payload
   const fwLower = (framework || "").toLowerCase();
-  let vercelFramework: string | null = null;
-  if (fwLower.includes("next")) vercelFramework = "nextjs";
-  else if (fwLower.includes("vite") || fwLower.includes("react")) vercelFramework = "vite";
-  else if (fwLower.includes("nuxt")) vercelFramework = "nuxtjs";
-  else if (fwLower.includes("vue")) vercelFramework = "vue";
-  else if (fwLower.includes("svelte")) vercelFramework = "svelte";
-  else if (fwLower.includes("angular")) vercelFramework = "angular";
+  let vercelFramework = overrides?.vercelFramework ?? null;
+  if (!vercelFramework) {
+    if (fwLower.includes("next")) vercelFramework = "nextjs";
+    else if (fwLower.includes("vite") || fwLower.includes("react")) vercelFramework = "vite";
+    else if (fwLower.includes("nuxt")) vercelFramework = "nuxtjs";
+    else if (fwLower.includes("vue")) vercelFramework = "vue";
+    else if (fwLower.includes("svelte")) vercelFramework = "svelte";
+    else if (fwLower.includes("angular")) vercelFramework = "angular";
+  }
 
-  deployPayload.projectSettings = {
-    buildCommand: needsBuild ? (buildCommand || "npm run build") : null,
-    outputDirectory: outputDir || (needsBuild ? "dist" : "."),
-    framework: vercelFramework,
-    installCommand: needsBuild ? "npm install --legacy-peer-deps" : null,
+  const deployPayload: any = {
+    name: projectName, project: projectName, files: fileEntries, target: "production",
+    projectSettings: {
+      buildCommand: needsBuild ? (buildCommand || "npm run build") : null,
+      outputDirectory: outputDir || (needsBuild ? "dist" : "."),
+      framework: vercelFramework,
+      installCommand: overrides?.installCommand || (needsBuild ? "npm install --legacy-peer-deps" : null),
+    },
   };
 
   let dr: any;
@@ -627,6 +871,7 @@ async function deployToVercel(
   }
 
   if (!dr.ok) {
+    // Try with static fallback
     if (needsBuild) {
       await appendLog("Build setup failed — retrying with minimal static settings...");
       deployPayload.projectSettings = { buildCommand: null, outputDirectory: ".", framework: null, installCommand: null };
@@ -653,7 +898,9 @@ async function deployToVercel(
     const sd = sr.data;
     await appendLog(`Build: ${sd.readyState}`);
     if (sd.readyState === "READY") { liveUrl = `https://${projectName}.vercel.app`; break; }
-    if (sd.readyState === "ERROR" || sd.readyState === "CANCELED") throw new Error(`Build failed: ${sd.errorMessage || sd.readyState}`);
+    if (sd.readyState === "ERROR" || sd.readyState === "CANCELED") {
+      throw new Error(`Build failed: ${sd.errorMessage || sd.readyState}`);
+    }
     attempts++;
   }
 
@@ -665,6 +912,7 @@ async function deployToRender(
   appendLog: (msg: string, extra?: Record<string, any>) => Promise<void>,
   envVars?: Array<{ key: string; value: string }>,
   userStartCommand?: string, userBuildCommand?: string,
+  overrides?: { rootDirectory?: string }
 ): Promise<{ deployId: string; liveUrl: string }> {
   const RENDER_API = "https://api.render.com/v1";
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
@@ -718,8 +966,12 @@ async function deployToRender(
       type: "web_service", name: serviceName, ownerId,
       repo: `https://github.com/${match[1]}/${match[2].replace(/\.git$/, "")}`,
       autoDeploy: "yes", branch: "main",
-      serviceDetails: { runtime, plan: "free", region: "oregon", envSpecificDetails: runtime !== "docker" ? { buildCommand, startCommand } : {} },
+      serviceDetails: {
+        runtime, plan: "free", region: "oregon",
+        envSpecificDetails: runtime !== "docker" ? { buildCommand, startCommand } : {},
+      },
     };
+    if (overrides?.rootDirectory) createPayload.rootDir = overrides.rootDirectory;
     if (envVars?.length) createPayload.envVars = envVars.map((e) => ({ key: e.key, value: e.value }));
 
     let createRes = await safeFetchJson(`${RENDER_API}/services`, { method: "POST", headers, body: JSON.stringify(createPayload) });
@@ -748,13 +1000,17 @@ async function deployToRender(
         await appendLog(`Render build: ${latest.status}`);
         if (latest.status === "live") { await appendLog(`Live ✓ → ${serviceUrl}`); break; }
         if (["deactivated", "build_failed", "update_failed", "canceled"].includes(latest.status)) {
+          // Fetch build logs to provide better error context
+          let buildLogText = "";
           if (latest.id) {
             const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latest.id}/logs`, { headers });
             if (logRes.ok && Array.isArray(logRes.data)) {
-              await appendLog(`Build logs:\n${logRes.data.map((l: any) => l.message || JSON.stringify(l)).join("\n").slice(-2000)}`);
+              buildLogText = logRes.data.map((l: any) => l.message || JSON.stringify(l)).join("\n").slice(-2000);
+              await appendLog(`Build logs:\n${buildLogText}`);
             }
           }
-          throw new Error(`Render deploy failed: ${latest.status}`);
+          // Include build log context in error for better auto-heal analysis
+          throw new Error(`Render deploy failed: ${latest.status}${buildLogText ? ` | Logs: ${buildLogText.slice(-500)}` : ""}`);
         }
       }
     } catch (e: any) {
@@ -785,14 +1041,12 @@ async function runAutoHeal(
   let currentRetry = dep.retry_count || 0;
 
   if (currentRetry >= MAX_RETRIES) {
-    // All retries exhausted → FAILED_FINAL
     await supabase.from("deployments").update({
       status: "error",
       error_message: `Auto-heal exhausted after ${MAX_RETRIES} retries: ${errorMessage}`,
       last_error_category: "exhausted",
     }).eq("id", deploymentId);
 
-    // Create alert
     await supabase.from("deployment_alerts").insert({
       deployment_id: deploymentId,
       project_id: project.id,
@@ -805,8 +1059,21 @@ async function runAutoHeal(
     return { healed: false, retryCount: currentRetry, finalStatus: "error" };
   }
 
-  // Analyze the error
-  const analysis = analyzeError(errorMessage);
+  // First try rule-based analysis
+  let analysis = analyzeError(errorMessage);
+
+  // If rule-based returns unknown, use AI analysis
+  if (analysis.category === "unknown_error") {
+    await appendLog(`🤖 [AUTO-HEAL] Rule-based analysis inconclusive, invoking AI analyzer...`);
+    analysis = await analyzeErrorWithAI(errorMessage, {
+      ...project,
+      provider: connection.provider,
+    });
+    if (analysis.extractedDetails?.aiAnalyzed) {
+      await appendLog(`🤖 [AUTO-HEAL] AI Analysis: ${analysis.category} — ${analysis.description}`);
+    }
+  }
+
   currentRetry++;
 
   await appendLog(`🔍 [AUTO-HEAL] Error Analysis: ${analysis.category} — ${analysis.description}`);
@@ -821,9 +1088,10 @@ async function runAutoHeal(
     error_message: errorMessage.slice(0, 500),
     fix_applied: analysis.suggestedFix,
     result: "in_progress",
+    fix_details: { aiAnalyzed: analysis.extractedDetails?.aiAnalyzed || false },
   });
 
-  // Re-download source files first (needed for framework re-analysis)
+  // Re-download source files for re-analysis
   let retryFiles: ExtractedFile[] = [];
   try {
     if (project.source_type === "github" && project.github_url) {
@@ -838,8 +1106,11 @@ async function runAutoHeal(
     }
   } catch {}
 
-  // Apply fix with files for re-analysis
-  const fix = applyFix(analysis.category, project, retryFiles);
+  // Re-analyze project structure for better fix context
+  const stackAnalysis = retryFiles.length > 0 ? detectProjectType(retryFiles) : undefined;
+
+  // Apply fix with full context
+  const fix = applyFix(analysis.category, project, stackAnalysis, analysis);
   await appendLog(`🛠️ [AUTO-HEAL] Applying fix: ${fix.fixApplied}`);
 
   if (!fix.shouldRetry) {
@@ -867,23 +1138,38 @@ async function runAutoHeal(
     if (retryFiles.length === 0) throw new Error("No source files found for retry");
 
     const needsBuild = detectBuildNeeded(retryFiles);
-    const reAnalysis = detectProjectType(retryFiles);
+    const reAnalysis = stackAnalysis || detectProjectType(retryFiles);
     const sub = dep.live_url
       ? dep.live_url.replace(/^https?:\/\//, "").replace(/\.(vercel\.app|onrender\.com).*$/, "")
       : project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-    // Apply fix modifications — use re-analyzed framework for better accuracy
+    // Compute effective commands incorporating the fix
     const effectiveBuildCmd = fix.modifiedBuildCommand || project.build_command || reAnalysis.buildCommand;
     const effectiveOutputDir = fix.modifiedOutputDir || project.output_dir || reAnalysis.outputDir;
     const effectiveFramework = reAnalysis.frontendFramework || project.framework || reAnalysis.framework;
-    const effectiveStartCmd = fix.modifiedStartCommand || project.backend_start_command;
+    const effectiveStartCmd = fix.modifiedStartCommand || project.backend_start_command || reAnalysis.backendStartCommand;
     const effectiveEnvVars = fix.modifiedEnvVars || [];
+    const effectiveInstallCmd = fix.modifiedInstallCommand || "npm install --legacy-peer-deps";
+    const effectiveRootDir = fix.modifiedRootDir || reAnalysis.frontendRootDir || "";
 
     let result: { deployId: string; liveUrl: string };
     if (connection.provider === "vercel") {
-      result = await deployToVercel(connection.token, sub, retryFiles, needsBuild, effectiveBuildCmd, effectiveOutputDir, effectiveFramework, appendLog);
+      result = await deployToVercel(
+        connection.token, sub, retryFiles, needsBuild,
+        effectiveBuildCmd, effectiveOutputDir, effectiveFramework, appendLog,
+        {
+          installCommand: effectiveInstallCmd,
+          rootDirectory: effectiveRootDir || undefined,
+          vercelFramework: (fix as any)._vercelFramework || undefined,
+          envVars: effectiveEnvVars,
+        }
+      );
     } else if (connection.provider === "render") {
-      result = await deployToRender(connection.token, sub, project.github_url, retryFiles, appendLog, effectiveEnvVars, effectiveStartCmd, effectiveBuildCmd);
+      result = await deployToRender(
+        connection.token, sub, project.github_url, retryFiles, appendLog,
+        effectiveEnvVars, effectiveStartCmd, effectiveBuildCmd,
+        { rootDirectory: fix.modifiedRootDir || reAnalysis.backendRootDir || undefined }
+      );
     } else {
       throw new Error("Unsupported provider");
     }
@@ -892,7 +1178,6 @@ async function runAutoHeal(
     await appendLog(`✅ [AUTO-HEAL] Retry ${currentRetry} succeeded!`, { status: "live", live_url: result.liveUrl, deploy_id: result.deployId });
     await supabase.from("projects").update({ status: "live" }).eq("id", project.id);
 
-    // Update heal log
     await supabase.from("deployment_heal_logs")
       .update({ result: "success" })
       .eq("deployment_id", deploymentId)
@@ -903,7 +1188,6 @@ async function runAutoHeal(
   } catch (retryErr: any) {
     await appendLog(`⚠️ [AUTO-HEAL] Retry ${currentRetry} failed: ${retryErr.message}`);
 
-    // Update heal log
     await supabase.from("deployment_heal_logs")
       .update({ result: "failed", fix_details: { error: retryErr.message } })
       .eq("deployment_id", deploymentId)
@@ -1012,22 +1296,22 @@ serve(async (req) => {
       if (!connection) throw new Error("Connection not found");
       const token = connection.token;
       const RENDER_API = "https://api.render.com/v1";
-      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+      const hdrs = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
       let serviceId = dep.deploy_id;
       if (!serviceId && dep.live_url) {
         const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
-        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers });
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers: hdrs });
         if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
       }
       if (!serviceId) throw new Error("Could not find Render service ID");
 
-      const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
+      const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers: hdrs });
       let deployLogs: any[] = [];
       if (deploysRes.ok && deploysRes.data?.length > 0) {
         const latestId = deploysRes.data[0]?.deploy?.id || deploysRes.data[0]?.id;
         if (latestId) {
-          const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestId}/logs`, { headers });
+          const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestId}/logs`, { headers: hdrs });
           if (logRes.ok && Array.isArray(logRes.data)) {
             deployLogs = logRes.data.map((l: any) => ({ timestamp: l.timestamp || new Date().toISOString(), message: l.message || JSON.stringify(l), level: l.level || "info" }));
           }
@@ -1042,8 +1326,6 @@ serve(async (req) => {
       if (!depId) throw new Error("Missing deploymentId");
       const { data: dep } = await supabase.from("deployments").select("*, cloud_connections(*)").eq("id", depId).single();
       if (!dep) throw new Error("Deployment not found");
-      const connection = (dep as any).cloud_connections;
-      if (!connection) throw new Error("Connection not found");
 
       let healthCheck = { reachable: false, statusCode: 0, responseTime: 0, error: "" };
       if (dep.live_url) {
@@ -1098,17 +1380,17 @@ serve(async (req) => {
       if (!connection || connection.provider !== "render") throw new Error("Only Render supports env vars editing");
 
       const RENDER_API = "https://api.render.com/v1";
-      const headers = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
+      const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
       let serviceId = dep.deploy_id;
       if (!serviceId && dep.live_url) {
         const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
-        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers });
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers: hdrs });
         if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
       }
       if (!serviceId) throw new Error("Could not find Render service ID");
 
       const envRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/env-vars`, {
-        method: "PUT", headers, body: JSON.stringify(envVars.map((e: any) => ({ key: e.key, value: e.value }))),
+        method: "PUT", headers: hdrs, body: JSON.stringify(envVars.map((e: any) => ({ key: e.key, value: e.value }))),
       });
       if (!envRes.ok) throw new Error(`Failed: ${JSON.stringify(envRes.data)}`);
       return json({ success: true });
@@ -1137,36 +1419,36 @@ serve(async (req) => {
         return json({ success: true, projectType: "frontend" });
       }
 
-      const analysis = detectProjectType(extractedFiles);
+      const stackAnalysis = detectProjectType(extractedFiles);
       let projectType = "frontend";
-      if (analysis.hasBackend && analysis.hasFrontend) projectType = "fullstack";
-      else if (analysis.hasBackend) projectType = "backend";
+      if (stackAnalysis.hasBackend && stackAnalysis.hasFrontend) projectType = "fullstack";
+      else if (stackAnalysis.hasBackend) projectType = "backend";
 
-      // Build a file tree summary for deep analysis display
       const fileSummary = extractedFiles.map((f) => f.path).sort();
       const directories = [...new Set(fileSummary.map((f) => f.split("/")[0]))];
 
       await supabase.from("projects").update({
         status: "ready",
-        framework: analysis.framework,
+        framework: stackAnalysis.framework,
         project_type: projectType,
-        build_command: analysis.buildCommand || "npm run build",
-        output_dir: analysis.outputDir || "dist",
-        frontend_framework: analysis.frontendFramework || null,
-        frontend_build_command: analysis.frontendBuildCommand || null,
-        frontend_output_dir: analysis.frontendOutputDir || null,
-        backend_framework: analysis.backendFramework || null,
-        backend_build_command: analysis.backendBuildCommand || null,
-        backend_start_command: analysis.backendStartCommand || null,
+        build_command: stackAnalysis.buildCommand || "npm run build",
+        output_dir: stackAnalysis.outputDir || "dist",
+        frontend_framework: stackAnalysis.frontendFramework || null,
+        frontend_build_command: stackAnalysis.frontendBuildCommand || null,
+        frontend_output_dir: stackAnalysis.frontendOutputDir || null,
+        backend_framework: stackAnalysis.backendFramework || null,
+        backend_build_command: stackAnalysis.backendBuildCommand || null,
+        backend_start_command: stackAnalysis.backendStartCommand || null,
       }).eq("id", analyzeProjectId);
 
       return json({
-        success: true, projectType, framework: analysis.framework,
-        hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend,
-        frontendFramework: analysis.frontendFramework, backendFramework: analysis.backendFramework,
-        backendStartCommand: analysis.backendStartCommand,
-        needsUserInput: analysis.needsUserInput, missingInfo: analysis.missingInfo,
-        detectedFiles: analysis.detectedFiles,
+        success: true, projectType, framework: stackAnalysis.framework,
+        hasFrontend: stackAnalysis.hasFrontend, hasBackend: stackAnalysis.hasBackend,
+        frontendFramework: stackAnalysis.frontendFramework, backendFramework: stackAnalysis.backendFramework,
+        frontendRootDir: stackAnalysis.frontendRootDir, backendRootDir: stackAnalysis.backendRootDir,
+        backendStartCommand: stackAnalysis.backendStartCommand,
+        needsUserInput: stackAnalysis.needsUserInput, missingInfo: stackAnalysis.missingInfo,
+        detectedFiles: stackAnalysis.detectedFiles,
         directories, totalFiles: extractedFiles.length,
       });
     }
@@ -1239,15 +1521,31 @@ serve(async (req) => {
       }
 
       const needsBuild = detectBuildNeeded(extractedFiles);
+      const stackAnalysis = detectProjectType(extractedFiles);
       const sub = dep.live_url
         ? dep.live_url.replace(/^https?:\/\//, "").replace(/\.(vercel\.app|onrender\.com).*$/, "")
         : project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
       let result: { deployId: string; liveUrl: string };
       if (connection.provider === "vercel") {
-        result = await deployToVercel(connection.token, sub, extractedFiles, needsBuild, project.build_command, project.output_dir, project.framework, appendLog);
+        // For fullstack on Vercel, use frontend rootDir
+        const rootDir = stackAnalysis.frontendRootDir || undefined;
+        result = await deployToVercel(
+          connection.token, sub, extractedFiles, needsBuild,
+          project.build_command || stackAnalysis.frontendBuildCommand,
+          project.output_dir || stackAnalysis.frontendOutputDir,
+          project.framework || stackAnalysis.frontendFramework,
+          appendLog,
+          { rootDirectory: rootDir, installCommand: "npm install --legacy-peer-deps" }
+        );
       } else {
-        result = await deployToRender(connection.token, sub, project.github_url, extractedFiles, appendLog);
+        result = await deployToRender(
+          connection.token, sub, project.github_url, extractedFiles, appendLog,
+          undefined,
+          project.backend_start_command || stackAnalysis.backendStartCommand,
+          project.backend_build_command || stackAnalysis.backendBuildCommand,
+          { rootDirectory: stackAnalysis.backendRootDir || undefined }
+        );
       }
 
       await appendLog("Redeployment successful! ✅", { status: "live", live_url: result.liveUrl, deploy_id: result.deployId });
@@ -1316,11 +1614,37 @@ serve(async (req) => {
     const projectAnalysis = detectProjectType(extractedFiles);
     await appendLog(`Analysis: frontend=${projectAnalysis.hasFrontend} (${projectAnalysis.frontendFramework}), backend=${projectAnalysis.hasBackend} (${projectAnalysis.backendFramework})`);
 
+    if (projectAnalysis.hasFrontend && projectAnalysis.hasBackend) {
+      await appendLog(`📁 Fullstack detected: frontend="${projectAnalysis.frontendRootDir || "root"}", backend="${projectAnalysis.backendRootDir || "root"}"`);
+    }
+
     let result: { deployId: string; liveUrl: string };
     if (provider === "vercel") {
-      result = await deployToVercel(token, desiredSubdomain, extractedFiles, needsBuild, project.build_command, project.output_dir, project.framework, appendLog);
+      // For Vercel: deploy frontend (use rootDirectory if fullstack)
+      const rootDir = projectAnalysis.frontendRootDir || undefined;
+      const buildCmd = customBuildCommand || project.frontend_build_command || project.build_command || projectAnalysis.frontendBuildCommand;
+      const outDir = project.frontend_output_dir || project.output_dir || projectAnalysis.frontendOutputDir;
+      const fw = project.frontend_framework || project.framework || projectAnalysis.frontendFramework;
+
+      result = await deployToVercel(
+        token, desiredSubdomain, extractedFiles, needsBuild, buildCmd, outDir, fw, appendLog,
+        {
+          installCommand: "npm install --legacy-peer-deps",
+          rootDirectory: rootDir,
+          envVars: bodyEnvVars,
+        }
+      );
     } else if (provider === "render") {
-      result = await deployToRender(token, desiredSubdomain, project.github_url, extractedFiles, appendLog, bodyEnvVars, customStartCommand, customBuildCommand);
+      // For Render: deploy backend (use rootDirectory if fullstack)
+      const rootDir = projectAnalysis.backendRootDir || undefined;
+      const startCmd = customStartCommand || project.backend_start_command || projectAnalysis.backendStartCommand;
+      const buildCmd = customBuildCommand || project.backend_build_command || projectAnalysis.backendBuildCommand;
+
+      result = await deployToRender(
+        token, desiredSubdomain, project.github_url, extractedFiles, appendLog,
+        bodyEnvVars, startCmd, buildCmd,
+        { rootDirectory: rootDir }
+      );
     } else {
       throw new Error(`Unsupported provider: ${provider}`);
     }
@@ -1355,7 +1679,6 @@ serve(async (req) => {
         console.error("Auto-heal error:", healErr);
       }
 
-      // If we get here, auto-heal failed or was exhausted
       const { data: finalCur } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
       await supabase.from("deployments").update({
         status: "error",
