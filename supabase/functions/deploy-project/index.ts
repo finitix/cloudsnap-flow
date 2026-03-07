@@ -1113,8 +1113,99 @@ serve(async (req) => {
   } catch (error: any) {
     console.error("Deployment error:", error);
     if (deploymentId) {
-      const { data: cur } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
+      // Auto-heal: check retry count and retry automatically
+      const { data: dep } = await supabase.from("deployments").select("*").eq("id", deploymentId).single();
+      const currentLogs = dep?.logs || "";
+      const retryMatch = currentLogs.match(/\[AUTO-HEAL\] Retry (\d+)/g);
+      const retryCount = retryMatch ? retryMatch.length : 0;
+      const MAX_RETRIES = 3;
+
+      if (retryCount < MAX_RETRIES) {
+        const ts = new Date().toISOString().slice(11, 19);
+        const retryNum = retryCount + 1;
+        const waitSec = retryNum * 10; // 10s, 20s, 30s backoff
+        await supabase.from("deployments").update({
+          status: "building",
+          error_message: null,
+          logs: currentLogs + `[${ts}] ⚠️ Error: ${error.message}\n[${ts}] [AUTO-HEAL] Retry ${retryNum}/${MAX_RETRIES} — waiting ${waitSec}s before retrying...\n`,
+        }).eq("id", deploymentId);
+
+        // Wait with backoff
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+
+        // Re-invoke this function for retry
+        try {
+          const retryBody: any = { deploymentId };
+          // Get the original deployment info to reconstruct the call
+          const { data: retryDep } = await supabase.from("deployments").select("*, projects(*), cloud_connections(*)").eq("id", deploymentId).single();
+          if (retryDep) {
+            const retryProject = (retryDep as any).projects;
+            const retryConn = (retryDep as any).cloud_connections;
+            if (retryProject && retryConn) {
+              // Perform inline retry instead of re-invoking
+              const retryAppendLog = async (log: string, extra?: Record<string, any>) => {
+                const { data: cur2 } = await supabase.from("deployments").select("logs").eq("id", deploymentId!).single();
+                const ts2 = new Date().toISOString().slice(11, 19);
+                await supabase.from("deployments").update({
+                  logs: (cur2?.logs || "") + `[${ts2}] ${log}\n`,
+                  ...extra,
+                }).eq("id", deploymentId!);
+              };
+
+              await retryAppendLog(`[AUTO-HEAL] Starting retry ${retryNum}...`);
+
+              let retryFiles: ExtractedFile[] = [];
+              if (retryProject.source_type === "github" && retryProject.github_url) {
+                const zipBuf = await downloadGitHubRepoZip(retryProject.github_url);
+                retryFiles = extractZipFilesRaw(zipBuf);
+              } else if (retryProject.source_type === "zip") {
+                const { data: fList } = await supabase.storage.from("project-uploads").list(retryProject.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
+                if (fList && fList.length > 0) {
+                  const fp = `${retryProject.user_id}/${fList[0].name}`;
+                  const { data: fd } = await supabase.storage.from("project-uploads").download(fp);
+                  if (fd) retryFiles = extractZipFilesRaw(await fd.arrayBuffer());
+                }
+              }
+
+              if (retryFiles.length > 0) {
+                const nb = detectBuildNeeded(retryFiles);
+                const sub = retryDep.live_url
+                  ? retryDep.live_url.replace(/^https?:\/\//, "").replace(/\.(vercel\.app|onrender\.com).*$/, "")
+                  : retryProject.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+                let retryResult: { deployId: string; liveUrl: string };
+                if (retryConn.provider === "vercel") {
+                  retryResult = await deployToVercel(retryConn.token, sub, retryFiles, nb, retryProject.build_command, retryProject.output_dir, retryProject.framework, retryAppendLog);
+                } else if (retryConn.provider === "render") {
+                  retryResult = await deployToRender(retryConn.token, sub, retryProject.github_url, retryFiles, retryAppendLog);
+                } else {
+                  throw new Error("Unsupported provider");
+                }
+
+                await retryAppendLog(`[AUTO-HEAL] Retry ${retryNum} succeeded! ✅`, { status: "live", live_url: retryResult.liveUrl, deploy_id: retryResult.deployId });
+                await supabase.from("projects").update({ status: "live" }).eq("id", retryProject.id);
+                return json({ success: true, url: retryResult.liveUrl, autoHealed: true, retryCount: retryNum });
+              }
+            }
+          }
+        } catch (retryErr: any) {
+          // Retry also failed — fall through to mark as error
+          const ts2 = new Date().toISOString().slice(11, 19);
+          const { data: cur3 } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
+          if (retryCount + 1 >= MAX_RETRIES) {
+            await supabase.from("deployments").update({
+              status: "error",
+              error_message: `Failed after ${MAX_RETRIES} auto-heal retries: ${retryErr.message}`,
+              logs: (cur3?.logs || "") + `[${ts2}] [AUTO-HEAL] Retry ${retryCount + 1} failed: ${retryErr.message}\n[${ts2}] ❌ All ${MAX_RETRIES} auto-heal retries exhausted.\n`,
+            }).eq("id", deploymentId);
+            return json({ success: false, error: `Auto-heal exhausted after ${MAX_RETRIES} retries: ${retryErr.message}` }, 500);
+          }
+        }
+      }
+
+      // No retries left or retry not applicable
       const ts = new Date().toISOString().slice(11, 19);
+      const { data: cur } = await supabase.from("deployments").select("logs").eq("id", deploymentId).single();
       await supabase.from("deployments").update({
         status: "error",
         error_message: error.message,
