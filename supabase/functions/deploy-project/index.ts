@@ -295,16 +295,60 @@ function detectProjectType(files: ExtractedFile[]): StackAnalysis {
 // ── Auto-Heal: Error Analyzer ──
 // ══════════════════════════════════════
 
-type ErrorCategory = "dependency_error" | "build_error" | "port_error" | "env_error" | "missing_files_error" | "timeout_error" | "unknown_error";
+type ErrorCategory = "dependency_error" | "build_error" | "port_error" | "env_error" | "missing_files_error" | "timeout_error" | "project_settings_error" | "framework_detection_error" | "permission_error" | "rate_limit_error" | "unknown_error";
 
 interface ErrorAnalysis {
   category: ErrorCategory;
   description: string;
   suggestedFix: string;
+  extractedDetails?: Record<string, any>;
 }
 
 function analyzeError(errorMessage: string): ErrorAnalysis {
   const msg = (errorMessage || "").toLowerCase();
+
+  // Vercel missing_project_settings — the #1 issue
+  if (msg.includes("missing_project_settings") || msg.includes("projectsettings") && msg.includes("required")) {
+    // Try to extract suggested framework from the error
+    let detectedFramework: string | null = null;
+    try {
+      const match = errorMessage.match(/"framework"\s*:\s*\{[^}]*"slug"\s*:\s*"?(\w+)"?/);
+      if (match) detectedFramework = match[1];
+    } catch {}
+    return {
+      category: "project_settings_error",
+      description: "Vercel requires projectSettings with build/output configuration for new projects",
+      suggestedFix: "Add projectSettings with auto-detected framework, buildCommand, and outputDirectory",
+      extractedDetails: { detectedFramework },
+    };
+  }
+
+  // Framework detection / auto-detection confirmation
+  if (msg.includes("skipautodetectionconfirmation") || msg.includes("automatic framework detection")) {
+    return {
+      category: "framework_detection_error",
+      description: "Vercel cannot auto-detect the framework and needs explicit settings",
+      suggestedFix: "Provide explicit framework and build settings in projectSettings",
+    };
+  }
+
+  // Permission / auth errors
+  if (msg.includes("forbidden") || msg.includes("401") || msg.includes("403") || msg.includes("not_authorized") || msg.includes("invalid_token")) {
+    return {
+      category: "permission_error",
+      description: "Authentication or permission error with the provider",
+      suggestedFix: "Check API token validity and permissions",
+    };
+  }
+
+  // Rate limit
+  if (msg.includes("rate_limit") || msg.includes("too many requests") || msg.includes("429")) {
+    return {
+      category: "rate_limit_error",
+      description: "Provider rate limit exceeded",
+      suggestedFix: "Wait and retry after cooldown period",
+    };
+  }
 
   // Dependency errors
   if (msg.includes("module not found") || msg.includes("cannot find module") || msg.includes("npm err") ||
@@ -388,8 +432,36 @@ interface FixAction {
   shouldRetry: boolean;
 }
 
-function applyFix(category: ErrorCategory, project: any): FixAction {
+function applyFix(category: ErrorCategory, project: any, files?: ExtractedFile[]): FixAction {
   switch (category) {
+    case "project_settings_error":
+    case "framework_detection_error": {
+      // Re-analyze the project to get correct framework settings
+      const analysis = files?.length ? detectProjectType(files) : null;
+      const fw = analysis?.frontendFramework || project.frontend_framework || project.framework || "";
+      const fwLower = fw.toLowerCase();
+      let vercelFramework: string | null = null;
+      let buildCmd = "npm run build";
+      let outputDir = "dist";
+      let installCmd = "npm install --legacy-peer-deps";
+
+      if (fwLower.includes("next")) { vercelFramework = "nextjs"; outputDir = ".next"; }
+      else if (fwLower.includes("vite") || fwLower.includes("react")) { vercelFramework = "vite"; outputDir = "dist"; }
+      else if (fwLower.includes("nuxt")) { vercelFramework = "nuxtjs"; outputDir = ".output"; }
+      else if (fwLower.includes("vue")) { vercelFramework = "vue"; outputDir = "dist"; }
+      else if (fwLower.includes("svelte")) { vercelFramework = "svelte"; outputDir = "build"; }
+      else if (fwLower.includes("angular")) { vercelFramework = "angular"; outputDir = "dist"; }
+      else if (fwLower.includes("static")) { vercelFramework = null; buildCmd = ""; outputDir = "."; }
+
+      return {
+        fixApplied: `Set projectSettings with framework=${vercelFramework || "auto"}, buildCommand=${buildCmd}, outputDirectory=${outputDir}`,
+        modifiedBuildCommand: buildCmd,
+        modifiedOutputDir: outputDir,
+        shouldRetry: true,
+        _vercelFramework: vercelFramework,
+        _installCommand: installCmd,
+      } as any;
+    }
     case "dependency_error":
       return {
         fixApplied: "Reinstall dependencies with --legacy-peer-deps flag",
@@ -427,6 +499,16 @@ function applyFix(category: ErrorCategory, project: any): FixAction {
       return {
         fixApplied: "Retry deployment (timeouts are often transient)",
         shouldRetry: true,
+      };
+    case "rate_limit_error":
+      return {
+        fixApplied: "Wait 60s for rate limit to reset, then retry",
+        shouldRetry: true,
+      };
+    case "permission_error":
+      return {
+        fixApplied: "Permission error — cannot auto-fix, check API token",
+        shouldRetry: false,
       };
     case "unknown_error":
     default:
@@ -506,14 +588,23 @@ async function deployToVercel(
   await appendLog(`All ${files.length} files uploaded ✓`);
 
   const deployPayload: any = { name: projectName, project: projectName, files: fileEntries, target: "production" };
-  if (needsBuild) {
-    deployPayload.projectSettings = {
-      buildCommand: buildCommand || "npm run build",
-      outputDirectory: outputDir || "dist",
-      framework: framework?.toLowerCase()?.includes("react") ? "vite" : framework?.toLowerCase() === "next.js" ? "nextjs" : null,
-      installCommand: "npm install --legacy-peer-deps",
-    };
-  }
+  
+  // Always include projectSettings — Vercel requires it for new projects
+  const fwLower = (framework || "").toLowerCase();
+  let vercelFramework: string | null = null;
+  if (fwLower.includes("next")) vercelFramework = "nextjs";
+  else if (fwLower.includes("vite") || fwLower.includes("react")) vercelFramework = "vite";
+  else if (fwLower.includes("nuxt")) vercelFramework = "nuxtjs";
+  else if (fwLower.includes("vue")) vercelFramework = "vue";
+  else if (fwLower.includes("svelte")) vercelFramework = "svelte";
+  else if (fwLower.includes("angular")) vercelFramework = "angular";
+
+  deployPayload.projectSettings = {
+    buildCommand: needsBuild ? (buildCommand || "npm run build") : null,
+    outputDirectory: outputDir || (needsBuild ? "dist" : "."),
+    framework: vercelFramework,
+    installCommand: needsBuild ? "npm install --legacy-peer-deps" : null,
+  };
 
   let dr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -537,8 +628,8 @@ async function deployToVercel(
 
   if (!dr.ok) {
     if (needsBuild) {
-      await appendLog("Build setup failed — retrying as static...");
-      delete deployPayload.projectSettings;
+      await appendLog("Build setup failed — retrying with minimal static settings...");
+      deployPayload.projectSettings = { buildCommand: null, outputDirectory: ".", framework: null, installCommand: null };
       dr = await safeFetchJson("https://api.vercel.com/v13/deployments", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -732,9 +823,33 @@ async function runAutoHeal(
     result: "in_progress",
   });
 
-  // Apply fix
-  const fix = applyFix(analysis.category, project);
+  // Re-download source files first (needed for framework re-analysis)
+  let retryFiles: ExtractedFile[] = [];
+  try {
+    if (project.source_type === "github" && project.github_url) {
+      const zipBuf = await downloadGitHubRepoZip(project.github_url);
+      retryFiles = extractZipFilesRaw(zipBuf);
+    } else if (project.source_type === "zip") {
+      const { data: fList } = await supabase.storage.from("project-uploads").list(project.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
+      if (fList?.length > 0) {
+        const { data: fd } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fList[0].name}`);
+        if (fd) retryFiles = extractZipFilesRaw(await fd.arrayBuffer());
+      }
+    }
+  } catch {}
+
+  // Apply fix with files for re-analysis
+  const fix = applyFix(analysis.category, project, retryFiles);
   await appendLog(`🛠️ [AUTO-HEAL] Applying fix: ${fix.fixApplied}`);
+
+  if (!fix.shouldRetry) {
+    await appendLog(`❌ [AUTO-HEAL] This error cannot be auto-fixed: ${fix.fixApplied}`);
+    await supabase.from("deployment_heal_logs")
+      .update({ result: "failed", fix_details: { reason: "not_auto_fixable" } })
+      .eq("deployment_id", deploymentId)
+      .eq("attempt_number", currentRetry);
+    return { healed: false, retryCount: currentRetry, finalStatus: "error" };
+  }
 
   // Update deployment with retry info
   const waitSec = currentRetry * 10;
@@ -749,34 +864,24 @@ async function runAutoHeal(
   await new Promise((r) => setTimeout(r, waitSec * 1000));
 
   try {
-    // Re-download source
-    let retryFiles: ExtractedFile[] = [];
-    if (project.source_type === "github" && project.github_url) {
-      const zipBuf = await downloadGitHubRepoZip(project.github_url);
-      retryFiles = extractZipFilesRaw(zipBuf);
-    } else if (project.source_type === "zip") {
-      const { data: fList } = await supabase.storage.from("project-uploads").list(project.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
-      if (fList?.length > 0) {
-        const { data: fd } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fList[0].name}`);
-        if (fd) retryFiles = extractZipFilesRaw(await fd.arrayBuffer());
-      }
-    }
-
     if (retryFiles.length === 0) throw new Error("No source files found for retry");
 
     const needsBuild = detectBuildNeeded(retryFiles);
+    const reAnalysis = detectProjectType(retryFiles);
     const sub = dep.live_url
       ? dep.live_url.replace(/^https?:\/\//, "").replace(/\.(vercel\.app|onrender\.com).*$/, "")
       : project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-    // Apply fix modifications
-    const effectiveBuildCmd = fix.modifiedBuildCommand || project.build_command;
+    // Apply fix modifications — use re-analyzed framework for better accuracy
+    const effectiveBuildCmd = fix.modifiedBuildCommand || project.build_command || reAnalysis.buildCommand;
+    const effectiveOutputDir = fix.modifiedOutputDir || project.output_dir || reAnalysis.outputDir;
+    const effectiveFramework = reAnalysis.frontendFramework || project.framework || reAnalysis.framework;
     const effectiveStartCmd = fix.modifiedStartCommand || project.backend_start_command;
     const effectiveEnvVars = fix.modifiedEnvVars || [];
 
     let result: { deployId: string; liveUrl: string };
     if (connection.provider === "vercel") {
-      result = await deployToVercel(connection.token, sub, retryFiles, needsBuild, effectiveBuildCmd, project.output_dir, project.framework, appendLog);
+      result = await deployToVercel(connection.token, sub, retryFiles, needsBuild, effectiveBuildCmd, effectiveOutputDir, effectiveFramework, appendLog);
     } else if (connection.provider === "render") {
       result = await deployToRender(connection.token, sub, project.github_url, retryFiles, appendLog, effectiveEnvVars, effectiveStartCmd, effectiveBuildCmd);
     } else {
