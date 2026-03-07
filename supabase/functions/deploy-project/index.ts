@@ -64,7 +64,24 @@ function detectBuildNeeded(files: ExtractedFile[]): boolean {
   return files.some((f) => f.path === "package.json" || f.path === "requirements.txt" || f.path === "Cargo.toml");
 }
 
-function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasBackend: boolean; framework: string; buildCommand: string; outputDir: string; startCommand: string } {
+interface StackAnalysis {
+  hasFrontend: boolean;
+  hasBackend: boolean;
+  framework: string;
+  buildCommand: string;
+  outputDir: string;
+  startCommand: string;
+  frontendFramework: string;
+  frontendBuildCommand: string;
+  frontendOutputDir: string;
+  backendFramework: string;
+  backendBuildCommand: string;
+  backendStartCommand: string;
+  needsUserInput: boolean;
+  missingInfo: string[];
+}
+
+function detectProjectType(files: ExtractedFile[]): StackAnalysis {
   const fileNames = files.map((f) => f.path.toLowerCase());
   const hasPackageJson = fileNames.includes("package.json");
   const hasIndexHtml = fileNames.includes("index.html");
@@ -82,53 +99,87 @@ function detectProjectType(files: ExtractedFile[]): { hasFrontend: boolean; hasB
   const hasFrontend = hasIndexHtml || hasTsx || hasVue || hasViteConfig;
   const hasBackend = hasPython || hasGo || hasRuby || hasDocker || hasProcfile || hasServerFile || hasNextConfig;
 
-  let framework = "Unknown";
-  let buildCommand = "npm run build";
-  let outputDir = "dist";
-  let startCommand = "npm start";
+  // Detect frontend stack
+  let frontendFramework = "Unknown";
+  let frontendBuildCommand = "npm run build";
+  let frontendOutputDir = "dist";
+
+  if (hasViteConfig && hasTsx) { frontendFramework = "React (Vite)"; }
+  else if (hasTsx) { frontendFramework = "React"; }
+  else if (hasVue) { frontendFramework = "Vue"; }
+  else if (hasIndexHtml) { frontendFramework = "Static HTML"; frontendBuildCommand = ""; frontendOutputDir = "."; }
+
+  // Detect backend stack
+  let backendFramework = "Unknown";
+  let backendBuildCommand = "npm install";
+  let backendStartCommand = "npm start";
 
   if (hasNextConfig) {
-    framework = "Next.js"; buildCommand = "npm run build"; outputDir = ".next"; startCommand = "npm start";
-  } else if (hasViteConfig && hasTsx) {
-    framework = "React"; buildCommand = "npm run build"; outputDir = "dist";
-  } else if (hasVue) {
-    framework = "Vue"; buildCommand = "npm run build"; outputDir = "dist";
-  } else if (hasTsx) {
-    framework = "React";
+    backendFramework = "Next.js"; backendBuildCommand = "npm run build"; backendStartCommand = "npm start";
+    frontendFramework = "Next.js"; frontendOutputDir = ".next";
   } else if (hasPython) {
-    framework = "Python"; buildCommand = "pip install -r requirements.txt"; outputDir = "";
-    startCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
+    backendFramework = "Python"; backendBuildCommand = "pip install -r requirements.txt";
+    backendStartCommand = fileNames.includes("manage.py") ? "python manage.py runserver 0.0.0.0:$PORT" : "python main.py";
   } else if (hasGo) {
-    framework = "Go"; buildCommand = "go build -o main ."; startCommand = "./main";
+    backendFramework = "Go"; backendBuildCommand = "go build -o main ."; backendStartCommand = "./main";
   } else if (hasRuby) {
-    framework = "Ruby"; buildCommand = "bundle install"; startCommand = "bundle exec rails server -p $PORT";
+    backendFramework = "Ruby"; backendBuildCommand = "bundle install"; backendStartCommand = "bundle exec rails server -p $PORT";
   } else if (hasDocker) {
-    framework = "Docker"; buildCommand = ""; startCommand = "";
+    backendFramework = "Docker"; backendBuildCommand = ""; backendStartCommand = "";
   } else if (hasServerFile) {
-    framework = "Node.js"; buildCommand = "npm install"; startCommand = "node server.js";
-  } else if (hasPackageJson) {
-    framework = "Node.js";
-  } else if (hasIndexHtml) {
-    framework = "Static HTML"; buildCommand = ""; outputDir = ".";
+    backendFramework = "Node.js";
+    const entryFile = ["server.js", "server.ts", "app.js", "app.ts"].find((f) => fileNames.includes(f)) || "server.js";
+    backendStartCommand = `node ${entryFile}`;
+    backendBuildCommand = "npm install";
   }
 
+  // Check package.json for more info
   const pkgFile = files.find((f) => f.path === "package.json");
   if (pkgFile) {
     try {
       const pkgJson = JSON.parse(new TextDecoder().decode(pkgFile.data));
       const deps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
-      if (deps["next"]) { framework = "Next.js"; outputDir = ".next"; }
-      else if (deps["react"]) { framework = "React"; }
-      else if (deps["vue"]) { framework = "Vue"; }
-      else if (deps["svelte"]) { framework = "Svelte"; }
-      else if (deps["express"] || deps["fastify"] || deps["koa"] || deps["hapi"]) {
-        framework = "Node.js";
-        if (!hasFrontend) startCommand = pkgJson.scripts?.start ? "npm start" : "node server.js";
+      if (deps["next"]) { frontendFramework = "Next.js"; backendFramework = "Next.js"; frontendOutputDir = ".next"; }
+      else if (deps["react"]) { frontendFramework = "React"; }
+      else if (deps["vue"]) { frontendFramework = "Vue"; }
+      else if (deps["svelte"]) { frontendFramework = "Svelte"; }
+      if (deps["express"] || deps["fastify"] || deps["koa"] || deps["hapi"]) {
+        backendFramework = `Node.js (${deps["express"] ? "Express" : deps["fastify"] ? "Fastify" : deps["koa"] ? "Koa" : "Hapi"})`;
+        if (pkgJson.scripts?.start) backendStartCommand = "npm start";
       }
+      if (pkgJson.scripts?.build && hasFrontend) frontendBuildCommand = "npm run build";
     } catch {}
   }
 
-  return { hasFrontend, hasBackend, framework, buildCommand, outputDir, startCommand };
+  // Determine what info is missing
+  const missingInfo: string[] = [];
+  if (hasBackend && !hasServerFile && !hasPython && !hasGo && !hasRuby && !hasDocker && !hasNextConfig) {
+    missingInfo.push("start_command");
+  }
+  if (hasBackend && backendStartCommand === "npm start" && !pkgFile) {
+    missingInfo.push("start_command");
+  }
+
+  // Primary framework for backward compat
+  let framework = hasFrontend ? frontendFramework : backendFramework;
+  if (framework === "Unknown" && hasBackend) framework = backendFramework;
+
+  return {
+    hasFrontend,
+    hasBackend,
+    framework,
+    buildCommand: hasFrontend ? frontendBuildCommand : backendBuildCommand,
+    outputDir: frontendOutputDir,
+    startCommand: backendStartCommand,
+    frontendFramework: hasFrontend ? frontendFramework : "",
+    frontendBuildCommand: hasFrontend ? frontendBuildCommand : "",
+    frontendOutputDir: hasFrontend ? frontendOutputDir : "",
+    backendFramework: hasBackend ? backendFramework : "",
+    backendBuildCommand: hasBackend ? backendBuildCommand : "",
+    backendStartCommand: hasBackend ? backendStartCommand : "",
+    needsUserInput: missingInfo.length > 0,
+    missingInfo,
+  };
 }
 
 async function downloadGitHubRepoZip(githubUrl: string): Promise<ArrayBuffer> {
