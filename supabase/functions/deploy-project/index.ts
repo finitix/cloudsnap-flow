@@ -876,9 +876,21 @@ serve(async (req) => {
         project_type: projectType,
         build_command: analysis.buildCommand || "npm run build",
         output_dir: analysis.outputDir || "dist",
+        frontend_framework: analysis.frontendFramework || null,
+        frontend_build_command: analysis.frontendBuildCommand || null,
+        frontend_output_dir: analysis.frontendOutputDir || null,
+        backend_framework: analysis.backendFramework || null,
+        backend_build_command: analysis.backendBuildCommand || null,
+        backend_start_command: analysis.backendStartCommand || null,
       }).eq("id", analyzeProjectId);
 
-      return json({ success: true, projectType, framework: analysis.framework, hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend });
+      return json({
+        success: true, projectType, framework: analysis.framework,
+        hasFrontend: analysis.hasFrontend, hasBackend: analysis.hasBackend,
+        frontendFramework: analysis.frontendFramework, backendFramework: analysis.backendFramework,
+        backendStartCommand: analysis.backendStartCommand,
+        needsUserInput: analysis.needsUserInput, missingInfo: analysis.missingInfo,
+      });
     }
 
     // ── Check project-name availability ──
