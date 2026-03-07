@@ -628,8 +628,8 @@ async function deployToVercel(
 
   if (!dr.ok) {
     if (needsBuild) {
-      await appendLog("Build setup failed — retrying as static...");
-      delete deployPayload.projectSettings;
+      await appendLog("Build setup failed — retrying with minimal static settings...");
+      deployPayload.projectSettings = { buildCommand: null, outputDirectory: ".", framework: null, installCommand: null };
       dr = await safeFetchJson("https://api.vercel.com/v13/deployments", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
