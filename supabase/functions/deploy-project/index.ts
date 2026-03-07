@@ -432,8 +432,36 @@ interface FixAction {
   shouldRetry: boolean;
 }
 
-function applyFix(category: ErrorCategory, project: any): FixAction {
+function applyFix(category: ErrorCategory, project: any, files?: ExtractedFile[]): FixAction {
   switch (category) {
+    case "project_settings_error":
+    case "framework_detection_error": {
+      // Re-analyze the project to get correct framework settings
+      const analysis = files?.length ? detectProjectType(files) : null;
+      const fw = analysis?.frontendFramework || project.frontend_framework || project.framework || "";
+      const fwLower = fw.toLowerCase();
+      let vercelFramework: string | null = null;
+      let buildCmd = "npm run build";
+      let outputDir = "dist";
+      let installCmd = "npm install --legacy-peer-deps";
+
+      if (fwLower.includes("next")) { vercelFramework = "nextjs"; outputDir = ".next"; }
+      else if (fwLower.includes("vite") || fwLower.includes("react")) { vercelFramework = "vite"; outputDir = "dist"; }
+      else if (fwLower.includes("nuxt")) { vercelFramework = "nuxtjs"; outputDir = ".output"; }
+      else if (fwLower.includes("vue")) { vercelFramework = "vue"; outputDir = "dist"; }
+      else if (fwLower.includes("svelte")) { vercelFramework = "svelte"; outputDir = "build"; }
+      else if (fwLower.includes("angular")) { vercelFramework = "angular"; outputDir = "dist"; }
+      else if (fwLower.includes("static")) { vercelFramework = null; buildCmd = ""; outputDir = "."; }
+
+      return {
+        fixApplied: `Set projectSettings with framework=${vercelFramework || "auto"}, buildCommand=${buildCmd}, outputDirectory=${outputDir}`,
+        modifiedBuildCommand: buildCmd,
+        modifiedOutputDir: outputDir,
+        shouldRetry: true,
+        _vercelFramework: vercelFramework,
+        _installCommand: installCmd,
+      } as any;
+    }
     case "dependency_error":
       return {
         fixApplied: "Reinstall dependencies with --legacy-peer-deps flag",
@@ -471,6 +499,16 @@ function applyFix(category: ErrorCategory, project: any): FixAction {
       return {
         fixApplied: "Retry deployment (timeouts are often transient)",
         shouldRetry: true,
+      };
+    case "rate_limit_error":
+      return {
+        fixApplied: "Wait 60s for rate limit to reset, then retry",
+        shouldRetry: true,
+      };
+    case "permission_error":
+      return {
+        fixApplied: "Permission error — cannot auto-fix, check API token",
+        shouldRetry: false,
       };
     case "unknown_error":
     default:
