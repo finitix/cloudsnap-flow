@@ -823,9 +823,33 @@ async function runAutoHeal(
     result: "in_progress",
   });
 
-  // Apply fix
-  const fix = applyFix(analysis.category, project);
+  // Re-download source files first (needed for framework re-analysis)
+  let retryFiles: ExtractedFile[] = [];
+  try {
+    if (project.source_type === "github" && project.github_url) {
+      const zipBuf = await downloadGitHubRepoZip(project.github_url);
+      retryFiles = extractZipFilesRaw(zipBuf);
+    } else if (project.source_type === "zip") {
+      const { data: fList } = await supabase.storage.from("project-uploads").list(project.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
+      if (fList?.length > 0) {
+        const { data: fd } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fList[0].name}`);
+        if (fd) retryFiles = extractZipFilesRaw(await fd.arrayBuffer());
+      }
+    }
+  } catch {}
+
+  // Apply fix with files for re-analysis
+  const fix = applyFix(analysis.category, project, retryFiles);
   await appendLog(`🛠️ [AUTO-HEAL] Applying fix: ${fix.fixApplied}`);
+
+  if (!fix.shouldRetry) {
+    await appendLog(`❌ [AUTO-HEAL] This error cannot be auto-fixed: ${fix.fixApplied}`);
+    await supabase.from("deployment_heal_logs")
+      .update({ result: "failed", fix_details: { reason: "not_auto_fixable" } })
+      .eq("deployment_id", deploymentId)
+      .eq("attempt_number", currentRetry);
+    return { healed: false, retryCount: currentRetry, finalStatus: "error" };
+  }
 
   // Update deployment with retry info
   const waitSec = currentRetry * 10;
@@ -840,34 +864,24 @@ async function runAutoHeal(
   await new Promise((r) => setTimeout(r, waitSec * 1000));
 
   try {
-    // Re-download source
-    let retryFiles: ExtractedFile[] = [];
-    if (project.source_type === "github" && project.github_url) {
-      const zipBuf = await downloadGitHubRepoZip(project.github_url);
-      retryFiles = extractZipFilesRaw(zipBuf);
-    } else if (project.source_type === "zip") {
-      const { data: fList } = await supabase.storage.from("project-uploads").list(project.user_id, { limit: 10, sortBy: { column: "created_at", order: "desc" } });
-      if (fList?.length > 0) {
-        const { data: fd } = await supabase.storage.from("project-uploads").download(`${project.user_id}/${fList[0].name}`);
-        if (fd) retryFiles = extractZipFilesRaw(await fd.arrayBuffer());
-      }
-    }
-
     if (retryFiles.length === 0) throw new Error("No source files found for retry");
 
     const needsBuild = detectBuildNeeded(retryFiles);
+    const reAnalysis = detectProjectType(retryFiles);
     const sub = dep.live_url
       ? dep.live_url.replace(/^https?:\/\//, "").replace(/\.(vercel\.app|onrender\.com).*$/, "")
       : project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-    // Apply fix modifications
-    const effectiveBuildCmd = fix.modifiedBuildCommand || project.build_command;
+    // Apply fix modifications — use re-analyzed framework for better accuracy
+    const effectiveBuildCmd = fix.modifiedBuildCommand || project.build_command || reAnalysis.buildCommand;
+    const effectiveOutputDir = fix.modifiedOutputDir || project.output_dir || reAnalysis.outputDir;
+    const effectiveFramework = reAnalysis.frontendFramework || project.framework || reAnalysis.framework;
     const effectiveStartCmd = fix.modifiedStartCommand || project.backend_start_command;
     const effectiveEnvVars = fix.modifiedEnvVars || [];
 
     let result: { deployId: string; liveUrl: string };
     if (connection.provider === "vercel") {
-      result = await deployToVercel(connection.token, sub, retryFiles, needsBuild, effectiveBuildCmd, project.output_dir, project.framework, appendLog);
+      result = await deployToVercel(connection.token, sub, retryFiles, needsBuild, effectiveBuildCmd, effectiveOutputDir, effectiveFramework, appendLog);
     } else if (connection.provider === "render") {
       result = await deployToRender(connection.token, sub, project.github_url, retryFiles, appendLog, effectiveEnvVars, effectiveStartCmd, effectiveBuildCmd);
     } else {
