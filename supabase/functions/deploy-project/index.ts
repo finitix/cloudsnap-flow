@@ -517,13 +517,13 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
 
   // Render build_failed
   if (msg.includes("render deploy failed") || msg.includes("render_build_failed") || (msg.includes("render") && msg.includes("build_failed"))) {
-    // Try to extract useful info from build logs
-    const logMatch = errorMessage.match(/Logs:\s*(.+)/s);
-    const logSnippet = logMatch?.[1]?.slice(0, 300) || "";
+    // Parse actual build logs if included
+    const logMatch = errorMessage.match(/=== RENDER BUILD LOGS ===\n([\s\S]+)$/);
+    const logSnippet = logMatch?.[1] || errorMessage.match(/Logs:\s*(.+)/s)?.[1]?.slice(0, 2000) || "";
     let subCategory = "general_render_build";
     let fix = "Re-analyze project, fix build/start commands";
 
-    if (logSnippet.includes("command not found") || logSnippet.includes("not found")) {
+    if (logSnippet.includes("command not found") || logSnippet.includes("not found:")) {
       subCategory = "render_command_not_found";
       fix = "Fix startCommand — binary or script not found";
     } else if (logSnippet.includes("ModuleNotFoundError") || logSnippet.includes("No module named")) {
@@ -532,13 +532,31 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     } else if (logSnippet.includes("npm ERR") || logSnippet.includes("ERESOLVE")) {
       subCategory = "render_npm_error";
       fix = "Use --legacy-peer-deps for npm install";
+    } else if (logSnippet.includes("Cannot find module") || logSnippet.includes("MODULE_NOT_FOUND")) {
+      subCategory = "render_missing_node_module";
+      fix = "Fix entry point or install missing dependency";
+    } else if (logSnippet.includes("ENOENT") || logSnippet.includes("no such file")) {
+      subCategory = "render_missing_file";
+      fix = "Fix rootDirectory or file paths";
+    } else if (logSnippet.includes("permission denied") || logSnippet.includes("EACCES")) {
+      subCategory = "render_permission";
+      fix = "Fix file permissions";
+    } else if (logSnippet.includes("SyntaxError") || logSnippet.includes("syntax error")) {
+      subCategory = "render_syntax_error";
+      fix = "Source code has syntax errors — check code";
+    } else if (logSnippet.includes("node:") && logSnippet.includes("ERR_")) {
+      subCategory = "render_node_error";
+      fix = "Node.js runtime error during build";
+    } else if (logSnippet.includes("npm warn") && logSnippet.includes("deprecated")) {
+      subCategory = "render_deprecated_deps";
+      fix = "Update deprecated dependencies";
     }
 
     return {
       category: "render_build_error",
       description: `Render build failed (${subCategory})`,
       suggestedFix: fix,
-      extractedDetails: { subCategory, logSnippet },
+      extractedDetails: { subCategory, logSnippet: logSnippet.slice(-500) },
     };
   }
 
@@ -1193,35 +1211,68 @@ async function runAutoHeal(
 
   currentRetry++;
 
-  // ── ALWAYS use AI on first attempt for Render errors ──
-  // For all retries, use AI analysis to get smarter, context-aware fixes
-  let analysis: ErrorAnalysis;
-  const isRenderError = errorMessage.toLowerCase().includes("render");
-
-  if (isRenderError || currentRetry >= 1) {
-    // Always invoke AI for Render errors — rule-based keeps repeating the same fix
-    await appendLog(`🤖 [AUTO-HEAL] Attempt ${currentRetry}/${MAX_RETRIES} — invoking AI error analysis...`);
-    analysis = await analyzeErrorWithAI(
-      `${errorMessage}\n\nRetry attempt: ${currentRetry}/${MAX_RETRIES}. Previous fix attempts have FAILED — suggest a DIFFERENT approach than just retrying with the same commands.`,
-      {
-        ...project,
-        provider: connection.provider,
-        backendRuntime: project.backend_framework?.includes("Python") ? "python" : 
-                       project.backend_framework?.includes("Go") ? "go" :
-                       project.backend_framework?.includes("Ruby") ? "ruby" : "node",
-        retryAttempt: currentRetry,
-        previousError: dep.error_message,
+  // ── Fetch ACTUAL build logs from Render before analyzing ──
+  let enrichedError = errorMessage;
+  if (connection.provider === "render") {
+    try {
+      const RENDER_API = "https://api.render.com/v1";
+      const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
+      // Find the service
+      let serviceId = dep.deploy_id;
+      if (!serviceId && dep.live_url) {
+        const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers: hdrs });
+        if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
       }
-    );
-    if (analysis.extractedDetails?.aiAnalyzed) {
-      await appendLog(`🤖 [AUTO-HEAL] AI Analysis: ${analysis.category} — ${analysis.description}`);
-    } else {
-      // AI failed, fall back to rule-based but with escalation
-      analysis = analyzeError(errorMessage);
-      await appendLog(`🔍 [AUTO-HEAL] Rule-based analysis: ${analysis.category} — ${analysis.description}`);
+      if (!serviceId) {
+        // Try finding by project name
+        const projName = project.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(projName)}&limit=1`, { headers: hdrs });
+        if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
+      }
+      if (serviceId) {
+        const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers: hdrs });
+        if (deploysRes.ok && deploysRes.data?.length > 0) {
+          const latestDeploy = deploysRes.data[0]?.deploy || deploysRes.data[0];
+          if (latestDeploy.id) {
+            const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestDeploy.id}/logs`, { headers: hdrs });
+            if (logRes.ok && Array.isArray(logRes.data) && logRes.data.length > 0) {
+              const buildLogs = logRes.data.map((l: any) => l.message || JSON.stringify(l)).join("\n");
+              enrichedError = `${errorMessage}\n\n=== RENDER BUILD LOGS ===\n${buildLogs.slice(-3000)}`;
+              await appendLog(`📋 [AUTO-HEAL] Fetched ${logRes.data.length} build log lines from Render`);
+              // Log last few lines for visibility
+              const lastLines = buildLogs.split("\n").slice(-5).join("\n");
+              await appendLog(`📋 [AUTO-HEAL] Last build output:\n${lastLines}`);
+            } else {
+              await appendLog(`⚠️ [AUTO-HEAL] No build logs available from Render`);
+            }
+          }
+        }
+      }
+    } catch (logErr: any) {
+      await appendLog(`⚠️ [AUTO-HEAL] Could not fetch Render build logs: ${logErr.message}`);
     }
+  }
+
+  // ── Analyze error: use AI with timeout, fallback to smart rule-based ──
+  let analysis: ErrorAnalysis;
+  await appendLog(`🤖 [AUTO-HEAL] Attempt ${currentRetry}/${MAX_RETRIES} — analyzing error...`);
+
+  // Try AI with short timeout (10s), but always fall back quickly
+  analysis = await analyzeErrorWithAI(enrichedError, {
+    ...project,
+    provider: connection.provider,
+    backendRuntime: project.backend_framework?.includes("Python") ? "python" :
+                   project.backend_framework?.includes("Go") ? "go" :
+                   project.backend_framework?.includes("Ruby") ? "ruby" : "node",
+    retryAttempt: currentRetry,
+    previousError: dep.error_message,
+  });
+
+  if (analysis.extractedDetails?.aiAnalyzed) {
+    await appendLog(`🤖 [AUTO-HEAL] AI Analysis: ${analysis.category} — ${analysis.description}`);
   } else {
-    analysis = analyzeError(errorMessage);
+    await appendLog(`🔍 [AUTO-HEAL] Rule-based analysis: ${analysis.category} — ${analysis.description}`);
   }
 
   await appendLog(`🔧 [AUTO-HEAL] Suggested Fix: ${analysis.suggestedFix}`);
