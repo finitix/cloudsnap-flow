@@ -527,8 +527,13 @@ serve(async (req) => {
         if (pubSubId) ec2Params["SubnetId"] = pubSubId;
         if (sgId) ec2Params["SecurityGroupId.1"] = sgId;
 
-        const instanceRes = await ec2Action(creds, "RunInstances", ec2Params);
+        const instanceRes = await ec2Action(creds, "RunInstances", ec2LaunchParams);
         const instanceId = extractTag(instanceRes.rawText, "instanceId");
+        
+        if (!instanceId) {
+          console.error("EC2 launch failed:", instanceRes.rawText);
+          throw new Error("Failed to launch EC2 instance: " + (instanceRes.rawText.substring(0, 200)));
+        }
 
         if (instanceId) {
           // Save EC2 resource
