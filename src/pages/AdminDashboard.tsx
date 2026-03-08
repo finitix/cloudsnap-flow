@@ -27,7 +27,7 @@ export default function AdminDashboard() {
       const [profilesRes, projectsRes, deploymentsRes, connectionsRes, feedbackRes, contactsRes] = await Promise.all([
         supabase.from("profiles").select("*").order("created_at", { ascending: false }),
         supabase.from("projects").select("id", { count: "exact", head: true }),
-        supabase.from("deployments").select("*").order("created_at", { ascending: false }).limit(10),
+        supabase.from("deployments").select("*").order("created_at", { ascending: false }),
         supabase.from("cloud_connections").select("id", { count: "exact", head: true }),
         supabase.from("feedback").select("*"),
         supabase.from("contact_messages").select("*"),
