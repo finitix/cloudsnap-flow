@@ -1176,27 +1176,46 @@ async function runAutoHeal(
     return { healed: false, retryCount: currentRetry, finalStatus: "error" };
   }
 
-  // Rule-based first, then AI if unknown
-  let analysis = analyzeError(errorMessage);
-  if (analysis.category === "unknown_error") {
-    await appendLog(`🤖 [AUTO-HEAL] Rule-based inconclusive, invoking AI...`);
-    analysis = await analyzeErrorWithAI(errorMessage, {
-      ...project, provider: connection.provider, backendRuntime: project.backend_framework?.includes("Python") ? "python" : "node",
-    });
+  currentRetry++;
+
+  // ── ALWAYS use AI on first attempt for Render errors ──
+  // For all retries, use AI analysis to get smarter, context-aware fixes
+  let analysis: ErrorAnalysis;
+  const isRenderError = errorMessage.toLowerCase().includes("render");
+
+  if (isRenderError || currentRetry >= 1) {
+    // Always invoke AI for Render errors — rule-based keeps repeating the same fix
+    await appendLog(`🤖 [AUTO-HEAL] Attempt ${currentRetry}/${MAX_RETRIES} — invoking AI error analysis...`);
+    analysis = await analyzeErrorWithAI(
+      `${errorMessage}\n\nRetry attempt: ${currentRetry}/${MAX_RETRIES}. Previous fix attempts have FAILED — suggest a DIFFERENT approach than just retrying with the same commands.`,
+      {
+        ...project,
+        provider: connection.provider,
+        backendRuntime: project.backend_framework?.includes("Python") ? "python" : 
+                       project.backend_framework?.includes("Go") ? "go" :
+                       project.backend_framework?.includes("Ruby") ? "ruby" : "node",
+        retryAttempt: currentRetry,
+        previousError: dep.error_message,
+      }
+    );
     if (analysis.extractedDetails?.aiAnalyzed) {
       await appendLog(`🤖 [AUTO-HEAL] AI Analysis: ${analysis.category} — ${analysis.description}`);
+    } else {
+      // AI failed, fall back to rule-based but with escalation
+      analysis = analyzeError(errorMessage);
+      await appendLog(`🔍 [AUTO-HEAL] Rule-based analysis: ${analysis.category} — ${analysis.description}`);
     }
+  } else {
+    analysis = analyzeError(errorMessage);
   }
 
-  currentRetry++;
-  await appendLog(`🔍 [AUTO-HEAL] Error Analysis: ${analysis.category} — ${analysis.description}`);
   await appendLog(`🔧 [AUTO-HEAL] Suggested Fix: ${analysis.suggestedFix}`);
 
   await supabase.from("deployment_heal_logs").insert({
     deployment_id: deploymentId, user_id: dep.user_id, attempt_number: currentRetry,
     error_category: analysis.category, error_message: errorMessage.slice(0, 500),
     fix_applied: analysis.suggestedFix, result: "in_progress",
-    fix_details: { aiAnalyzed: analysis.extractedDetails?.aiAnalyzed || false },
+    fix_details: { aiAnalyzed: analysis.extractedDetails?.aiAnalyzed || false, retryAttempt: currentRetry },
   });
 
   // Re-download source
@@ -1214,7 +1233,23 @@ async function runAutoHeal(
   } catch {}
 
   const stackAnalysis = retryFiles.length > 0 ? detectProjectType(retryFiles) : undefined;
-  const fix = applyFix(analysis.category, project, stackAnalysis, analysis);
+  
+  // ── Escalation strategy: different fix per retry ──
+  let fix: FixAction;
+  if (analysis.extractedDetails?.aiAnalyzed) {
+    // Use AI-suggested fix directly
+    fix = {
+      fixApplied: `AI fix (attempt ${currentRetry}): ${analysis.suggestedFix}`,
+      modifiedBuildCommand: analysis.extractedDetails.modifiedBuildCommand || undefined,
+      modifiedStartCommand: analysis.extractedDetails.modifiedStartCommand || undefined,
+      modifiedInstallCommand: analysis.extractedDetails.modifiedInstallCommand || undefined,
+      shouldRetry: true,
+    };
+  } else {
+    // Rule-based with escalation
+    fix = applyFixWithEscalation(analysis.category, project, stackAnalysis, analysis, currentRetry, retryFiles);
+  }
+
   await appendLog(`🛠️ [AUTO-HEAL] Applying fix: ${fix.fixApplied}`);
 
   if (!fix.shouldRetry) {
@@ -1253,6 +1288,14 @@ async function runAutoHeal(
         { installCommand: effectiveInstallCmd, rootDirectory: effectiveRootDir || undefined, vercelFramework: fix._vercelFramework || undefined, envVars: effectiveEnvVars }
       );
     } else if (connection.provider === "render") {
+      // For Render: if existing service, update build/start commands before triggering deploy
+      if (dep.deploy_id || dep.live_url) {
+        await updateRenderServiceConfig(
+          connection.token, dep, appendLog,
+          effectiveBuildCmd, effectiveStartCmd, effectiveEnvVars,
+          reAnalysis.backendRuntime || "node"
+        );
+      }
       result = await deployToRender(
         connection.token, sub, project.github_url, retryFiles, appendLog,
         effectiveEnvVars, effectiveStartCmd, effectiveBuildCmd,
@@ -1271,10 +1314,204 @@ async function runAutoHeal(
     await appendLog(`⚠️ [AUTO-HEAL] Retry ${currentRetry} failed: ${retryErr.message}`);
     await supabase.from("deployment_heal_logs").update({ result: "failed", error_message: retryErr.message.slice(0, 500) }).eq("deployment_id", deploymentId).eq("attempt_number", currentRetry);
 
-    // Recursive retry
+    // Recursive retry with accumulated error context
     await supabase.from("deployments").update({ retry_count: currentRetry, error_message: retryErr.message }).eq("id", deploymentId);
     return runAutoHeal(supabase, deploymentId, retryErr.message, appendLog);
   }
+}
+
+// ── Update Render service build/start commands before retry ──
+async function updateRenderServiceConfig(
+  token: string, dep: any, appendLog: (msg: string) => Promise<void>,
+  buildCommand: string, startCommand: string, envVars: Array<{ key: string; value: string }>,
+  runtime: string
+): Promise<void> {
+  const RENDER_API = "https://api.render.com/v1";
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  let serviceId = dep.deploy_id;
+  if (!serviceId && dep.live_url) {
+    const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
+    const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers });
+    if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
+  }
+  if (!serviceId) return;
+
+  // Update service configuration with corrected commands
+  const updatePayload: any = {
+    serviceDetails: {
+      envSpecificDetails: {
+        buildCommand,
+        startCommand,
+      },
+    },
+  };
+
+  await appendLog(`🔧 [AUTO-HEAL] Updating Render service config: build="${buildCommand}", start="${startCommand}"`);
+  const updateRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}`, {
+    method: "PATCH", headers, body: JSON.stringify(updatePayload),
+  });
+
+  if (!updateRes.ok) {
+    await appendLog(`⚠️ Service config update warning: ${JSON.stringify(updateRes.data)}`);
+  }
+
+  // Update env vars if provided
+  if (envVars?.length) {
+    await safeFetchJson(`${RENDER_API}/services/${serviceId}/env-vars`, {
+      method: "PUT", headers, body: JSON.stringify(envVars.map((e) => ({ key: e.key, value: e.value }))),
+    });
+  }
+}
+
+// ── Escalating fix strategy per retry attempt ──
+function applyFixWithEscalation(
+  category: ErrorCategory, project: any, analysis: StackAnalysis | undefined,
+  errorAnalysis: ErrorAnalysis, retryAttempt: number, files: ExtractedFile[]
+): FixAction {
+  // For Render build errors, escalate strategies across retries
+  if (category === "render_build_error") {
+    const backendDir = analysis?.backendRootDir || "";
+    const bf = (analysis?.backendFramework || "").toLowerCase();
+    const isPython = bf.includes("python") || bf.includes("django") || bf.includes("flask") || bf.includes("fastapi");
+    const isGo = bf.includes("go");
+    const isRuby = bf.includes("ruby");
+
+    if (retryAttempt === 1) {
+      // Attempt 1: Smart detection — inspect actual package.json for scripts
+      let buildCmd = "npm install";
+      let startCmd = "npm start";
+
+      if (isPython) {
+        buildCmd = backendDir ? `cd ${backendDir} && pip install -r requirements.txt` : "pip install -r requirements.txt";
+        if (bf.includes("django")) startCmd = backendDir ? `cd ${backendDir} && python manage.py runserver 0.0.0.0:$PORT` : "python manage.py runserver 0.0.0.0:$PORT";
+        else if (bf.includes("fastapi")) startCmd = backendDir ? `cd ${backendDir} && uvicorn main:app --host 0.0.0.0 --port $PORT` : "uvicorn main:app --host 0.0.0.0 --port $PORT";
+        else startCmd = backendDir ? `cd ${backendDir} && python app.py` : "python app.py";
+      } else if (isGo) {
+        buildCmd = backendDir ? `cd ${backendDir} && go build -o main .` : "go build -o main .";
+        startCmd = backendDir ? `cd ${backendDir} && ./main` : "./main";
+      } else if (isRuby) {
+        buildCmd = backendDir ? `cd ${backendDir} && bundle install` : "bundle install";
+        startCmd = backendDir ? `cd ${backendDir} && bundle exec rails server -p $PORT` : "bundle exec rails server -p $PORT";
+      } else {
+        // Node.js: inspect package.json in backend dir for actual entry point
+        const pkgPath = backendDir ? `${backendDir}/package.json` : "package.json";
+        const pkgText = readFileText(files, pkgPath);
+        let entryPoint = "server.js";
+        let hasStartScript = false;
+        let hasBuildScript = false;
+
+        if (pkgText) {
+          try {
+            const pkg = JSON.parse(pkgText);
+            hasStartScript = !!pkg.scripts?.start;
+            hasBuildScript = !!pkg.scripts?.build;
+            // Check main field
+            if (pkg.main) entryPoint = pkg.main;
+            // Check for common entry files
+            const allPaths = files.map(f => f.path.toLowerCase());
+            for (const candidate of ["index.js", "app.js", "server.js", "index.ts", "app.ts", "server.ts"]) {
+              const checkPath = backendDir ? `${backendDir}/${candidate}` : candidate;
+              if (allPaths.includes(checkPath.toLowerCase())) {
+                entryPoint = candidate;
+                break;
+              }
+            }
+          } catch {}
+        }
+
+        buildCmd = backendDir 
+          ? `cd ${backendDir} && npm install --legacy-peer-deps${hasBuildScript ? " && npm run build" : ""}`
+          : `npm install --legacy-peer-deps${hasBuildScript ? " && npm run build" : ""}`;
+        startCmd = hasStartScript
+          ? (backendDir ? `cd ${backendDir} && npm start` : "npm start")
+          : (backendDir ? `cd ${backendDir} && node ${entryPoint}` : `node ${entryPoint}`);
+      }
+
+      return {
+        fixApplied: `Attempt 1: Smart detection — build="${buildCmd}", start="${startCmd}"`,
+        modifiedBuildCommand: buildCmd,
+        modifiedStartCommand: startCmd,
+        modifiedEnvVars: [{ key: "NODE_ENV", value: "production" }, { key: "PORT", value: "10000" }],
+        shouldRetry: true,
+      };
+    }
+
+    if (retryAttempt === 2) {
+      // Attempt 2: Try with yarn instead of npm, or different entry points
+      let buildCmd: string;
+      let startCmd: string;
+
+      if (isPython || isGo || isRuby) {
+        // For non-Node: try with clear cache
+        buildCmd = isPython
+          ? (backendDir ? `cd ${backendDir} && pip install --no-cache-dir -r requirements.txt` : "pip install --no-cache-dir -r requirements.txt")
+          : isGo
+          ? (backendDir ? `cd ${backendDir} && CGO_ENABLED=0 go build -o main .` : "CGO_ENABLED=0 go build -o main .")
+          : (backendDir ? `cd ${backendDir} && bundle install --clean` : "bundle install --clean");
+        startCmd = isPython
+          ? (bf.includes("django") ? "gunicorn --bind 0.0.0.0:$PORT config.wsgi:application" : bf.includes("fastapi") ? "uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1" : "python app.py")
+          : isGo ? "./main" : "bundle exec puma -p $PORT";
+        if (backendDir && !isPython) startCmd = `cd ${backendDir} && ${startCmd}`;
+      } else {
+        // Node: try yarn, try different entry points
+        const allPaths = files.map(f => f.path.toLowerCase());
+        const hasYarnLock = allPaths.some(p => p.endsWith("yarn.lock") || (backendDir && p === `${backendDir}/yarn.lock`.toLowerCase()));
+        
+        if (hasYarnLock) {
+          buildCmd = backendDir ? `cd ${backendDir} && yarn install` : "yarn install";
+          startCmd = backendDir ? `cd ${backendDir} && yarn start` : "yarn start";
+        } else {
+          // Try with Node 18 specific flags and different entry
+          buildCmd = backendDir
+            ? `cd ${backendDir} && npm ci --legacy-peer-deps || npm install --legacy-peer-deps`
+            : "npm ci --legacy-peer-deps || npm install --legacy-peer-deps";
+
+          // Find actual entry files
+          const entryFiles = ["src/index.js", "src/server.js", "src/app.js", "index.js", "app.js", "server.js", "dist/index.js"];
+          let foundEntry = "server.js";
+          for (const ef of entryFiles) {
+            const checkPath = backendDir ? `${backendDir}/${ef}` : ef;
+            if (allPaths.includes(checkPath.toLowerCase())) {
+              foundEntry = ef;
+              break;
+            }
+          }
+          startCmd = backendDir ? `cd ${backendDir} && node ${foundEntry}` : `node ${foundEntry}`;
+        }
+      }
+
+      return {
+        fixApplied: `Attempt 2: Alternative commands — build="${buildCmd}", start="${startCmd}"`,
+        modifiedBuildCommand: buildCmd,
+        modifiedStartCommand: startCmd,
+        modifiedEnvVars: [{ key: "NODE_ENV", value: "production" }, { key: "PORT", value: "10000" }, { key: "NPM_CONFIG_PRODUCTION", value: "false" }],
+        shouldRetry: true,
+      };
+    }
+
+    if (retryAttempt >= 3) {
+      // Attempt 3: Nuclear option — minimal setup, clear cache
+      let buildCmd = backendDir ? `cd ${backendDir} && rm -rf node_modules && npm install --legacy-peer-deps` : "rm -rf node_modules && npm install --legacy-peer-deps";
+      let startCmd = backendDir ? `cd ${backendDir} && node .` : "node .";
+
+      if (isPython) {
+        buildCmd = backendDir ? `cd ${backendDir} && pip install -r requirements.txt 2>&1 || true` : "pip install -r requirements.txt 2>&1 || true";
+        startCmd = backendDir ? `cd ${backendDir} && python -m flask run --host=0.0.0.0 --port=$PORT || python app.py || python main.py` : "python -m flask run --host=0.0.0.0 --port=$PORT || python app.py || python main.py";
+      }
+
+      return {
+        fixApplied: `Attempt 3: Nuclear rebuild — clean + fallback entry — build="${buildCmd}", start="${startCmd}"`,
+        modifiedBuildCommand: buildCmd,
+        modifiedStartCommand: startCmd,
+        modifiedEnvVars: [{ key: "NODE_ENV", value: "production" }, { key: "PORT", value: "10000" }, { key: "NPM_CONFIG_PRODUCTION", value: "false" }, { key: "CI", value: "false" }],
+        shouldRetry: true,
+      };
+    }
+  }
+
+  // For non-render errors, use the standard fix engine
+  return applyFix(category, project, analysis, errorAnalysis);
 }
 
 // ══════════════════════════════════════
