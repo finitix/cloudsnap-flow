@@ -16,10 +16,11 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
     const load = async () => {
-      const [pRes, cRes, dRes] = await Promise.all([
+      const [pRes, cRes, dRes, awsRes] = await Promise.all([
         supabase.from("projects").select("id", { count: "exact", head: true }),
         supabase.from("cloud_connections").select("*"),
         supabase.from("deployments").select("*").order("created_at", { ascending: false }).limit(5),
+        supabase.from("aws_connections").select("id", { count: "exact", head: true }),
       ]);
       const liveRes = await supabase.from("deployments").select("id", { count: "exact", head: true }).eq("status", "live");
       const errorRes = await supabase.from("deployments").select("id", { count: "exact", head: true }).eq("status", "error");
@@ -30,12 +31,13 @@ export default function Dashboard() {
 
       setStats({
         projects: pRes.count || 0,
-        connections: conns.length,
+        connections: conns.length + (awsRes.count || 0),
         deployments: (dRes.data?.length) || 0,
         live: liveRes.count || 0,
         errors: errorRes.count || 0,
         frontendConns,
         backendConns,
+        awsConns: awsRes.count || 0,
       });
       setRecentDeployments(dRes.data || []);
     };
