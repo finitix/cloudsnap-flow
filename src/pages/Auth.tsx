@@ -117,6 +117,7 @@ export default function Auth() {
           </p>
         </div>
       </div>
-    </div>
+        </div>
+      </div>
   );
 }

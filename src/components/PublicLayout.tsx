@@ -121,7 +121,6 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
               <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground mb-4">Product</h4>
               <div className="space-y-2.5">
                 <Link to="/features" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">Features</Link>
-                <Link to="/integrations" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">Integrations</Link>
                 <Link to="/pricing" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</Link>
                 <Link to="/reviews" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">Reviews</Link>
               </div>

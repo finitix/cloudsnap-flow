@@ -65,7 +65,7 @@ const AppRoutes = () => (
     <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
     <Route path="/about" element={<About />} />
     <Route path="/features" element={<Features />} />
-    <Route path="/integrations" element={<Integrations />} />
+    <Route path="/integrations" element={<Navigate to="/features" replace />} />
     <Route path="/pricing" element={<Pricing />} />
     <Route path="/reviews" element={<Reviews />} />
     <Route path="/contact" element={<ContactSupport />} />
