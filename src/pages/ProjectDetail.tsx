@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from "@/components/ui/badge";
 import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2, Pencil, ScrollText, AlertTriangle, Zap, Shield, Bell, Activity } from "lucide-react";
 import { toast } from "sonner";
+import AWSInfrastructureDashboard from "@/components/AWSInfrastructureDashboard";
 
 interface HealLog {
   id: string;
@@ -542,6 +543,11 @@ export default function ProjectDetail() {
             </div>
           )}
         </div>
+
+        {/* AWS Infrastructure Dashboard */}
+        {project?.aws_connection_id && (
+          <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+        )}
 
         {/* Deployment History */}
         <div className="glass-card rounded-xl overflow-hidden">

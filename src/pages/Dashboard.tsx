@@ -6,19 +6,21 @@ import StatusBadge from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { Plus, Cloud, FolderGit2, Rocket, ArrowUpRight, Activity, Plug, Server, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [stats, setStats] = useState({ projects: 0, connections: 0, deployments: 0, live: 0, errors: 0, frontendConns: 0, backendConns: 0 });
+  const [stats, setStats] = useState({ projects: 0, connections: 0, deployments: 0, live: 0, errors: 0, frontendConns: 0, backendConns: 0, awsConns: 0 });
   const [recentDeployments, setRecentDeployments] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user) return;
     const load = async () => {
-      const [pRes, cRes, dRes] = await Promise.all([
+      const [pRes, cRes, dRes, awsRes] = await Promise.all([
         supabase.from("projects").select("id", { count: "exact", head: true }),
         supabase.from("cloud_connections").select("*"),
         supabase.from("deployments").select("*").order("created_at", { ascending: false }).limit(5),
+        supabase.from("aws_connections").select("id", { count: "exact", head: true }),
       ]);
       const liveRes = await supabase.from("deployments").select("id", { count: "exact", head: true }).eq("status", "live");
       const errorRes = await supabase.from("deployments").select("id", { count: "exact", head: true }).eq("status", "error");
@@ -29,12 +31,13 @@ export default function Dashboard() {
 
       setStats({
         projects: pRes.count || 0,
-        connections: conns.length,
+        connections: conns.length + (awsRes.count || 0),
         deployments: (dRes.data?.length) || 0,
         live: liveRes.count || 0,
         errors: errorRes.count || 0,
         frontendConns,
         backendConns,
+        awsConns: awsRes.count || 0,
       });
       setRecentDeployments(dRes.data || []);
     };
@@ -80,37 +83,30 @@ export default function Dashboard() {
         </div>
 
         {/* Connection Categories */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="glass-card rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Globe className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Frontend Deployment</h3>
+              <h3 className="font-semibold text-sm">Frontend</h3>
             </div>
             <p className="text-2xl font-bold mb-1">{stats.frontendConns}</p>
-            <p className="text-xs text-muted-foreground">Vercel, Netlify connections</p>
+            <p className="text-xs text-muted-foreground">Vercel connections</p>
           </div>
           <div className="glass-card rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Server className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Backend Deployment</h3>
+              <h3 className="font-semibold text-sm">Backend</h3>
             </div>
             <p className="text-2xl font-bold mb-1">{stats.backendConns}</p>
-            <p className="text-xs text-muted-foreground">Render, Railway connections</p>
+            <p className="text-xs text-muted-foreground">Render connections</p>
           </div>
-        </div>
-
-        {/* Coming Soon */}
-        <div className="glass-card rounded-xl p-5 mb-8">
-          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-primary" /> Coming Soon
-          </h3>
-          <div className="grid grid-cols-3 gap-3">
-            {["AWS", "Google Cloud", "Azure"].map((name) => (
-              <div key={name} className="rounded-lg border border-border/50 p-3 opacity-50">
-                <p className="text-sm font-medium">{name}</p>
-                <span className="text-[10px] font-mono text-muted-foreground">Coming Soon</span>
-              </div>
-            ))}
+          <div className="glass-card rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Cloud className="h-4 w-4 text-amber-400" />
+              <h3 className="font-semibold text-sm">AWS Cloud</h3>
+            </div>
+            <p className="text-2xl font-bold mb-1">{stats.awsConns}</p>
+            <p className="text-xs text-muted-foreground">AWS accounts connected</p>
           </div>
         </div>
 
