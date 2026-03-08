@@ -511,21 +511,20 @@ serve(async (req) => {
           projectType: appType || project.project_type || "frontend",
         });
 
-        const ec2Params: Record<string, string> = {
+        const ec2LaunchParams: Record<string, string> = {
           ImageId: amiId,
           InstanceType: FREE_TIER.ec2InstanceType,
           MinCount: "1",
           MaxCount: "1",
           UserData: userData,
+          SubnetId: pubSubId,
+          "SecurityGroupId.1": sgId,
           "TagSpecification.1.ResourceType": "instance",
           "TagSpecification.1.Tag.1.Key": "Name",
-          "TagSpecification.1.Tag.1.Value": `cloudsnap-${project.name}`,
+          "TagSpecification.1.Tag.1.Value": `cloudsnap-${safeName}`,
           "TagSpecification.1.Tag.2.Key": "cloudsnap-project",
           "TagSpecification.1.Tag.2.Value": projectId,
         };
-
-        if (pubSubId) ec2Params["SubnetId"] = pubSubId;
-        if (sgId) ec2Params["SecurityGroupId.1"] = sgId;
 
         const instanceRes = await ec2Action(creds, "RunInstances", ec2LaunchParams);
         const instanceId = extractTag(instanceRes.rawText, "instanceId");
