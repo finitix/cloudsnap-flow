@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Cloud, Zap, ArrowRight } from "lucide-react";
+import { Cloud, Zap, ArrowRight, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Auth() {
@@ -67,7 +67,15 @@ export default function Auth() {
       </div>
 
       {/* Right panel - form */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex flex-col p-8">
+        <div className="mb-4">
+          <Link to="/">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-4 w-4 mr-1.5" /> Back to Home
+            </Button>
+          </Link>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
         <div className="w-full max-w-sm space-y-8">
           <div className="lg:hidden flex items-center gap-3 mb-4">
             <Cloud className="h-7 w-7 text-primary" />
@@ -109,6 +117,7 @@ export default function Auth() {
           </p>
         </div>
       </div>
-    </div>
+        </div>
+      </div>
   );
 }
