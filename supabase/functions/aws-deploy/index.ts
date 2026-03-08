@@ -368,12 +368,41 @@ serve(async (req) => {
       }).select().single();
       const deploymentId = deployRec?.id;
 
-      // ── Step 1: Create VPC ──
+      // ── Step 1: Create or Reuse VPC ──
       try {
+        let vpcId = "";
         const vpcRes = await ec2Action(creds, "CreateVpc", { "CidrBlock": "10.0.0.0/16" });
-        if (!vpcRes.ok) throw new Error("VPC creation failed: " + vpcRes.rawText);
-        const vpcId = vpcRes.data?.CreateVpcResponse?.vpc?.vpcId || extractTag(vpcRes.rawText, "vpcId");
-        if (!vpcId) throw new Error("Could not extract VPC ID");
+        
+        if (vpcRes.rawText?.includes("VpcLimitExceeded")) {
+          // VPC limit reached — try to find and reuse an existing cloudsnap VPC
+          console.log("VPC limit reached, attempting to reuse existing cloudsnap VPC...");
+          const descRes = await ec2Action(creds, "DescribeVpcs", {
+            "Filter.1.Name": "tag:cloudsnap-project",
+            "Filter.1.Value.1": "*",
+          });
+          const existingVpcId = extractTag(descRes.rawText, "vpcId");
+          
+          if (!existingVpcId) {
+            // No cloudsnap VPC found, try to find default VPC
+            const defaultRes = await ec2Action(creds, "DescribeVpcs", {
+              "Filter.1.Name": "isDefault",
+              "Filter.1.Value.1": "true",
+            });
+            const defaultVpcId = extractTag(defaultRes.rawText, "vpcId");
+            if (defaultVpcId) {
+              vpcId = defaultVpcId;
+              console.log("Using default VPC:", vpcId);
+            } else {
+              throw new Error("AWS VPC limit reached and no existing VPC found to reuse. Please delete unused VPCs in your AWS console (us-east-1) and retry.");
+            }
+          } else {
+            vpcId = existingVpcId;
+            console.log("Reusing existing cloudsnap VPC:", vpcId);
+          }
+        } else {
+          vpcId = vpcRes.data?.CreateVpcResponse?.vpc?.vpcId || extractTag(vpcRes.rawText, "vpcId");
+          if (!vpcId) throw new Error("Could not extract VPC ID");
+        }
 
         // Tag VPC
         await ec2Action(creds, "CreateTags", {
