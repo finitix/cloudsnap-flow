@@ -13,6 +13,13 @@ import Connections from "./pages/Connections";
 import Deployments from "./pages/Deployments";
 import Monitoring from "./pages/Monitoring";
 import Settings from "./pages/Settings";
+import About from "./pages/About";
+import Reviews from "./pages/Reviews";
+import Contact from "./pages/Contact";
+import Support from "./pages/Support";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
+import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -35,6 +42,12 @@ const AppRoutes = () => (
   <Routes>
     <Route path="/" element={<Index />} />
     <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
+    <Route path="/about" element={<About />} />
+    <Route path="/reviews" element={<Reviews />} />
+    <Route path="/contact" element={<Contact />} />
+    <Route path="/support" element={<Support />} />
+    <Route path="/terms" element={<Terms />} />
+    <Route path="/privacy" element={<Privacy />} />
     <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
     <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
     <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
@@ -42,6 +55,7 @@ const AppRoutes = () => (
     <Route path="/deployments" element={<ProtectedRoute><Deployments /></ProtectedRoute>} />
     <Route path="/monitoring" element={<ProtectedRoute><Monitoring /></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+    <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

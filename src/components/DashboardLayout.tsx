@@ -1,7 +1,8 @@
 import { ReactNode, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useAdmin } from "@/hooks/useAdmin";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { Cloud, LayoutDashboard, FolderGit2, Plug, LogOut, Rocket, Activity, Settings, PanelLeftClose, PanelLeft, ArrowLeft } from "lucide-react";
+import { Cloud, LayoutDashboard, FolderGit2, Plug, LogOut, Rocket, Activity, Settings, PanelLeftClose, PanelLeft, ArrowLeft, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
