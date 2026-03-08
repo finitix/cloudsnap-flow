@@ -577,7 +577,7 @@ export default function ProjectDetail() {
         {/* AWS Infrastructure Dashboard */}
         {project?.aws_connection_id && (
           <>
-            <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+            <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} projectType={project.project_type} databaseEngine={project.database_engine} />
             <AWSMonitoringDashboard
               projectId={project.id}
               awsConnectionId={project.aws_connection_id}
