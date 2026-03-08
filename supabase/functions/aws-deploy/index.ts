@@ -453,33 +453,37 @@ serve(async (req) => {
         }).eq("id", infra.id);
 
         // ── Step 4: Security Group ──
+        const safeName = project.name.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
         const sgRes = await ec2Action(creds, "CreateSecurityGroup", {
-          GroupName: `cloudsnap-${project.name}-${Date.now()}`,
-          Description: `Security group for ${project.name}`,
+          GroupName: `cloudsnap-${safeName}-${Date.now()}`,
+          Description: `Security group for ${safeName}`,
           VpcId: vpcId,
         });
         const sgId = extractTag(sgRes.rawText, "groupId");
 
-        if (sgId) {
-          // Allow HTTP
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "80", ToPort: "80", "CidrIp": "0.0.0.0/0",
-          });
-          // Allow HTTPS
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "443", ToPort: "443", "CidrIp": "0.0.0.0/0",
-          });
-          // Allow SSH (for debugging)
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "22", ToPort: "22", "CidrIp": "0.0.0.0/0",
-          });
-          // Allow app port
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "3000", ToPort: "9000", "CidrIp": "0.0.0.0/0",
-          });
-
-          await supabase.from("aws_infrastructure").update({ security_group_id: sgId, status: "launching_compute" }).eq("id", infra.id);
+        if (!sgId) {
+          console.error("Security group creation failed:", sgRes.rawText);
+          throw new Error("Failed to create security group: " + (sgRes.rawText.substring(0, 200)));
         }
+
+        // Allow HTTP
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "80", ToPort: "80", CidrIp: "0.0.0.0/0",
+        });
+        // Allow HTTPS
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "443", ToPort: "443", CidrIp: "0.0.0.0/0",
+        });
+        // Allow SSH (for debugging)
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "22", ToPort: "22", CidrIp: "0.0.0.0/0",
+        });
+        // Allow app ports
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "3000", ToPort: "9000", CidrIp: "0.0.0.0/0",
+        });
+
+        await supabase.from("aws_infrastructure").update({ security_group_id: sgId, status: "launching_compute" }).eq("id", infra.id);
 
         // ── Step 5: Launch EC2 Instance ──
         // Get latest Amazon Linux 2 AMI
@@ -507,60 +511,60 @@ serve(async (req) => {
           projectType: appType || project.project_type || "frontend",
         });
 
-        const ec2Params: Record<string, string> = {
+        const ec2LaunchParams: Record<string, string> = {
           ImageId: amiId,
           InstanceType: FREE_TIER.ec2InstanceType,
           MinCount: "1",
           MaxCount: "1",
           UserData: userData,
+          SubnetId: pubSubId,
+          "SecurityGroupId.1": sgId,
           "TagSpecification.1.ResourceType": "instance",
           "TagSpecification.1.Tag.1.Key": "Name",
-          "TagSpecification.1.Tag.1.Value": `cloudsnap-${project.name}`,
+          "TagSpecification.1.Tag.1.Value": `cloudsnap-${safeName}`,
           "TagSpecification.1.Tag.2.Key": "cloudsnap-project",
           "TagSpecification.1.Tag.2.Value": projectId,
         };
 
-        if (pubSubId) ec2Params["SubnetId"] = pubSubId;
-        if (sgId) ec2Params["SecurityGroupId.1"] = sgId;
-
-        const instanceRes = await ec2Action(creds, "RunInstances", ec2Params);
+        const instanceRes = await ec2Action(creds, "RunInstances", ec2LaunchParams);
         const instanceId = extractTag(instanceRes.rawText, "instanceId");
+        
+        if (!instanceId) {
+          console.error("EC2 launch failed:", instanceRes.rawText);
+          throw new Error("Failed to launch EC2 instance: " + (instanceRes.rawText.substring(0, 200)));
+        }
 
-        if (instanceId) {
-          // Save EC2 resource
-          await supabase.from("aws_resources").insert({
-            infrastructure_id: infra.id,
-            user_id: userId,
-            resource_type: "ec2",
-            resource_id: instanceId,
-            status: "running",
-            config: { instanceType: FREE_TIER.ec2InstanceType, amiId, port },
-            monthly_cost_estimate: COST_ESTIMATES.ec2_t2_micro,
-          });
+        // Save EC2 resource
+        await supabase.from("aws_resources").insert({
+          infrastructure_id: infra.id,
+          user_id: userId,
+          resource_type: "ec2",
+          resource_id: instanceId,
+          status: "running",
+          config: { instanceType: FREE_TIER.ec2InstanceType, amiId, port },
+          monthly_cost_estimate: COST_ESTIMATES.ec2_t2_micro,
+        });
 
-          // Wait longer for public IP assignment, then retry
-          let publicIp = "";
-          let publicDns = "";
-          for (let attempt = 0; attempt < 5; attempt++) {
-            await new Promise(r => setTimeout(r, 5000));
-            const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
-            publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress") || "";
-            publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName") || "";
-            if (publicIp || publicDns) break;
+        // Wait for public IP assignment with retries
+        let publicIp = "";
+        let publicDns = "";
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await new Promise(r => setTimeout(r, 5000));
+          const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
+          publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress") || "";
+          publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName") || "";
+          if (publicIp || publicDns) break;
+        }
+
+        if (publicIp || publicDns) {
+          const liveUrl = `http://${publicDns || publicIp}`;
+          await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: liveUrl }).eq("infrastructure_id", infra.id).eq("resource_type", "ec2");
+
+          if (deploymentId) {
+            await supabase.from("deployments").update({ status: "live", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
           }
-
-          if (publicIp || publicDns) {
-            const liveUrl = `http://${publicDns || publicIp}`;
-            await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: liveUrl }).eq("infrastructure_id", infra.id).eq("resource_type", "ec2");
-
-            // Update deployment with live URL using the deployment ID
-            if (deploymentId) {
-              await supabase.from("deployments").update({ status: "live", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
-            }
-          } else if (deploymentId) {
-            // Still mark as live but note no public IP yet
-            await supabase.from("deployments").update({ status: "live", deploy_id: instanceId, error_message: "Public IP not yet assigned — check AWS console" }).eq("id", deploymentId);
-          }
+        } else if (deploymentId) {
+          await supabase.from("deployments").update({ status: "live", deploy_id: instanceId, error_message: "Public IP not yet assigned — check back in a few minutes" }).eq("id", deploymentId);
         }
 
         await supabase.from("aws_infrastructure").update({ status: "creating_resources" }).eq("id", infra.id);
@@ -592,8 +596,8 @@ serve(async (req) => {
 
           // Create DB security group
           const dbSgRes = await ec2Action(creds, "CreateSecurityGroup", {
-            GroupName: `cloudsnap-db-${project.name}-${Date.now()}`,
-            Description: `DB security group for ${project.name}`,
+            GroupName: `cloudsnap-db-${safeName}-${Date.now()}`,
+            Description: `DB security group for ${safeName}`,
             VpcId: vpcId,
           });
           const dbSgId = extractTag(dbSgRes.rawText, "groupId");
@@ -657,8 +661,10 @@ serve(async (req) => {
           estimated_monthly_cost: totalCost,
         }).eq("id", infra.id);
 
-        // Update deployment status
-        await supabase.from("deployments").update({ status: "live" }).eq("project_id", projectId).eq("provider", "aws").order("created_at", { ascending: false }).limit(1);
+        // Update deployment status using deployment ID
+        if (deploymentId) {
+          await supabase.from("deployments").update({ status: "live" }).eq("id", deploymentId);
+        }
 
         return json({
           success: true,
@@ -677,7 +683,9 @@ serve(async (req) => {
 
       } catch (e: any) {
         await supabase.from("aws_infrastructure").update({ status: "error", error_message: e.message }).eq("id", infra.id);
-        await supabase.from("deployments").update({ status: "error", error_message: e.message }).eq("project_id", projectId).eq("provider", "aws").order("created_at", { ascending: false }).limit(1);
+        if (deploymentId) {
+          await supabase.from("deployments").update({ status: "error", error_message: e.message }).eq("id", deploymentId);
+        }
         return json({ success: false, error: e.message });
       }
     }
