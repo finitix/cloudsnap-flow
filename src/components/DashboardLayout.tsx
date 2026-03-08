@@ -74,7 +74,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         )}
 
         <nav className={cn("flex-1 space-y-1", collapsed ? "p-2" : "p-4")}>
-          {navItems.map((item) => {
+          {allNavItems.map((item) => {
             const active = location.pathname === item.path || (item.path !== "/dashboard" && location.pathname.startsWith(item.path));
             const linkContent = (
               <Link
