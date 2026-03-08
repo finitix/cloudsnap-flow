@@ -191,17 +191,22 @@ export default function Pricing() {
       </section>
 
       {/* CTA */}
-      <section className="section-padding-lg" style={{ background: "linear-gradient(180deg, hsl(210 40% 98%), hsl(200 50% 97%))" }}>
-        <div className="max-w-3xl mx-auto px-6 text-center">
+      <section className="section-padding-lg relative overflow-hidden" style={{ background: "linear-gradient(180deg, hsl(210 40% 98%), hsl(200 50% 97%))" }}>
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-primary/[0.03] blur-[100px]" />
+        </div>
+        <div className="max-w-3xl mx-auto px-6 text-center relative z-10">
+          <Rocket className="h-12 w-12 text-primary mx-auto mb-6" />
           <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
             Start deploying today.
           </h2>
-          <p className="text-muted-foreground mb-8 text-lg">No credit card required. Free forever plan available.</p>
+          <p className="text-muted-foreground mb-10 text-lg max-w-lg mx-auto">No credit card required. Free forever plan available.</p>
           <Link to="/auth">
-            <Button size="lg" className="h-13 px-10 text-sm font-semibold shadow-sm">
-              Get Started Free <ArrowRight className="ml-2 h-4 w-4" />
+            <Button size="lg" className="h-14 px-12 text-base font-semibold shadow-md hover:shadow-lg transition-shadow rounded-xl">
+              Get Started Free <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
           </Link>
+          <p className="text-xs text-muted-foreground mt-5">Join 2,000+ developers deploying smarter</p>
         </div>
       </section>
     </PublicLayout>
