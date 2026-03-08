@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [stats, setStats] = useState({ projects: 0, connections: 0, deployments: 0, live: 0, errors: 0, frontendConns: 0, backendConns: 0 });
+  const [stats, setStats] = useState({ projects: 0, connections: 0, deployments: 0, live: 0, errors: 0, frontendConns: 0, backendConns: 0, awsConns: 0 });
   const [recentDeployments, setRecentDeployments] = useState<any[]>([]);
 
   useEffect(() => {
