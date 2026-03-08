@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Plus, Trash2, ExternalLink, Server, Globe, Cloud, Lock, RefreshCw,
   ChevronDown, ChevronUp, User, FolderGit2, CreditCard, Activity, Loader2,
-  Shield, Key, MapPin, AlertTriangle, CheckCircle, ArrowRight, Clock
+  Shield, Key, MapPin, AlertTriangle, CheckCircle, ArrowRight, Clock, Zap
 } from "lucide-react";
 import { toast } from "sonner";
 
