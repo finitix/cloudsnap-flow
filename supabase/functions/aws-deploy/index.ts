@@ -343,11 +343,7 @@ serve(async (req) => {
         region: project.aws_region || awsConn.default_region,
       };
 
-      // Check for existing infrastructure (limit 1 per project)
-      const { data: existingInfra } = await supabase.from("aws_infrastructure").select("id").eq("project_id", projectId).neq("status", "deleted");
-      if (existingInfra && existingInfra.length >= FREE_TIER.maxEnvironments) {
-        return json({ success: false, error: "Free tier limit: Only 1 active environment per project. Delete existing infrastructure first." });
-      }
+      // No environment limit — allow multiple infrastructures per project
 
       // Create infrastructure record
       const { data: infra, error: infraErr } = await supabase.from("aws_infrastructure").insert({
