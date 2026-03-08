@@ -1342,11 +1342,13 @@ async function runAutoHeal(
   let fix: FixAction;
   if (analysis.extractedDetails?.aiAnalyzed) {
     // Use AI-suggested fix directly
+    const aiEnvVars = analysis.extractedDetails.envVars as Array<{key: string; value: string}> | undefined;
     fix = {
       fixApplied: `AI fix (attempt ${currentRetry}): ${analysis.suggestedFix}`,
       modifiedBuildCommand: analysis.extractedDetails.modifiedBuildCommand || undefined,
       modifiedStartCommand: analysis.extractedDetails.modifiedStartCommand || undefined,
       modifiedInstallCommand: analysis.extractedDetails.modifiedInstallCommand || undefined,
+      modifiedEnvVars: aiEnvVars || [{ key: "NODE_ENV", value: "production" }, { key: "PORT", value: "10000" }],
       shouldRetry: true,
     };
   } else {
