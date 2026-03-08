@@ -456,7 +456,7 @@ serve(async (req) => {
         const safeName = project.name.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
         const sgRes = await ec2Action(creds, "CreateSecurityGroup", {
           GroupName: `cloudsnap-${safeName}-${Date.now()}`,
-          Description: `Security group for ${safeName}`,
+          GroupDescription: `Security group for ${safeName}`,
           VpcId: vpcId,
         });
         const sgId = extractTag(sgRes.rawText, "groupId");
@@ -597,7 +597,7 @@ serve(async (req) => {
           // Create DB security group
           const dbSgRes = await ec2Action(creds, "CreateSecurityGroup", {
             GroupName: `cloudsnap-db-${safeName}-${Date.now()}`,
-            Description: `DB security group for ${safeName}`,
+            GroupDescription: `DB security group for ${safeName}`,
             VpcId: vpcId,
           });
           const dbSgId = extractTag(dbSgRes.rawText, "groupId");
