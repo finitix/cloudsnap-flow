@@ -54,7 +54,7 @@ export default function Settings() {
 
   return (
     <DashboardLayout>
-      <div className="p-8 max-w-3xl">
+      <div className="p-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <SettingsIcon className="h-6 w-6 text-primary" /> Settings

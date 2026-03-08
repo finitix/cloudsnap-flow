@@ -309,7 +309,7 @@ export default function ProjectDetail() {
 
   return (
     <DashboardLayout>
-      <div className="p-8 max-w-5xl">
+      <div className="p-8">
         {/* Alerts Banner */}
         {unreadAlerts.length > 0 && (
           <div className="mb-6 space-y-2">
