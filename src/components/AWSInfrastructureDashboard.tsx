@@ -135,6 +135,8 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
 
   // No infrastructure yet — show deploy button
   if (!infrastructure || infrastructure.status === "deleted") {
+    const appType = projectType || "frontend";
+    const dbEngine = databaseEngine || "none";
     return (
       <div className="glass-card rounded-xl p-8 text-center">
         <Cloud className="h-10 w-10 mx-auto mb-4 text-amber-400 opacity-60" />
@@ -142,15 +144,18 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
         <p className="text-sm text-muted-foreground mb-4">
           Create VPC, EC2, and optional RDS infrastructure on AWS Free Tier
         </p>
-        <div className="flex gap-2 justify-center">
-          <Button onClick={() => handleDeploy("frontend", "none")} disabled={deploying}>
-            {deploying ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deploying...</> : <><Globe className="h-4 w-4 mr-2" /> Deploy Frontend</>}
-          </Button>
-          <Button variant="outline" onClick={() => handleDeploy("backend", "postgresql")} disabled={deploying}>
-            <Server className="h-4 w-4 mr-2" /> Deploy Backend + DB
+        <div className="flex gap-2 justify-center flex-wrap">
+          <Button onClick={() => handleDeploy(appType, dbEngine)} disabled={deploying}>
+            {deploying ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating Infrastructure...</> : (
+              appType === "backend" || appType === "fullstack"
+                ? <><Server className="h-4 w-4 mr-2" /> Deploy {appType === "fullstack" ? "Full Stack" : "Backend"}{dbEngine !== "none" ? ` + ${dbEngine}` : ""}</>
+                : <><Globe className="h-4 w-4 mr-2" /> Deploy Frontend</>
+            )}
           </Button>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-3">Free tier: t2.micro EC2 + db.t3.micro RDS</p>
+        <p className="text-[10px] text-muted-foreground mt-3">
+          Free tier: t2.micro EC2{dbEngine !== "none" ? ` + db.t3.micro RDS (${dbEngine})` : ""} • Region: us-east-1
+        </p>
       </div>
     );
   }
