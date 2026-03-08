@@ -1395,13 +1395,16 @@ async function runAutoHeal(
         { installCommand: effectiveInstallCmd, rootDirectory: effectiveRootDir || undefined, vercelFramework: fix._vercelFramework || undefined, envVars: effectiveEnvVars }
       );
     } else if (connection.provider === "render") {
-      // For Render: if existing service, update build/start commands before triggering deploy
-      if (dep.deploy_id || dep.live_url) {
+      // Always update Render service config before retry with new commands
+      await appendLog(`🔧 [AUTO-HEAL] Updating Render service: build="${effectiveBuildCmd}", start="${effectiveStartCmd}"`);
+      try {
         await updateRenderServiceConfig(
-          connection.token, dep, appendLog,
+          connection.token, { ...dep, deploy_id: dep.deploy_id, live_url: dep.live_url || `https://${sub}.onrender.com` }, appendLog,
           effectiveBuildCmd, effectiveStartCmd, effectiveEnvVars,
           reAnalysis.backendRuntime || "node"
         );
+      } catch (cfgErr: any) {
+        await appendLog(`⚠️ [AUTO-HEAL] Config update warning: ${cfgErr.message}`);
       }
       result = await deployToRender(
         connection.token, sub, project.github_url, retryFiles, appendLog,
