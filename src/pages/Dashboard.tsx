@@ -6,6 +6,7 @@ import StatusBadge from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { Plus, Cloud, FolderGit2, Rocket, ArrowUpRight, Activity, Plug, Server, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
   const { user } = useAuth();
