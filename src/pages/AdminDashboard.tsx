@@ -108,6 +108,9 @@ export default function AdminDashboard() {
           ))}
         </div>
 
+        {/* Analytics Charts */}
+        <AdminAnalyticsCharts users={allUsers} deployments={allDeployments} feedback={allFeedback} contacts={allContacts} />
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Users */}
           <div className="glass-card rounded-xl overflow-hidden">
