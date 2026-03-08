@@ -440,12 +440,78 @@ export default function Connections() {
                           )}
                         </TabsContent>
                         <TabsContent value="billing" className="mt-4">
-                          {bill ? (
-                            <div className="bg-muted/50 rounded-lg p-4">
-                              <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(bill, null, 2)}</pre>
+                          {loadingBilling === c.id ? (
+                            <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
+                              <Loader2 className="h-4 w-4 animate-spin" /> Loading billing...
+                            </div>
+                          ) : bill ? (
+                            <div className="space-y-4">
+                              {/* Plan Summary */}
+                              <div className="bg-muted/50 rounded-lg p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h4 className="text-xs font-semibold text-muted-foreground uppercase">Plan Overview</h4>
+                                  <Badge className="bg-primary/10 text-primary text-[10px] border-primary/20 capitalize">{bill.summary?.plan || bill.plan || "free"}</Badge>
+                                </div>
+                                <div className="grid grid-cols-3 gap-3">
+                                  <div className="bg-background/50 rounded-lg p-3">
+                                    <p className="text-xs text-muted-foreground">Total Services</p>
+                                    <p className="text-xl font-bold">{bill.summary?.serviceCount || bill.usage?.length || 0}</p>
+                                  </div>
+                                  <div className="bg-background/50 rounded-lg p-3">
+                                    <p className="text-xs text-muted-foreground">Free Services</p>
+                                    <p className="text-xl font-bold text-green-400">{bill.summary?.freeServices ?? bill.usage?.length ?? 0}</p>
+                                  </div>
+                                  <div className="bg-background/50 rounded-lg p-3">
+                                    <p className="text-xs text-muted-foreground">Paid Services</p>
+                                    <p className="text-xl font-bold">{bill.summary?.paidServices ?? 0}</p>
+                                  </div>
+                                </div>
+                                {bill.summary?.note && (
+                                  <p className="text-[11px] text-muted-foreground mt-3 bg-background/50 rounded-lg px-3 py-2 flex items-center gap-2">
+                                    <Activity className="h-3.5 w-3.5 text-primary shrink-0" />
+                                    {bill.summary.note}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Service List */}
+                              {bill.usage && bill.usage.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Services</h4>
+                                  <div className="space-y-2">
+                                    {bill.usage.map((svc: any, i: number) => (
+                                      <div key={i} className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+                                        <div className="flex items-center gap-3">
+                                          <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                                            <Server className="h-4 w-4 text-primary" />
+                                          </div>
+                                          <div>
+                                            <p className="text-sm font-medium">{svc.name}</p>
+                                            <p className="text-[10px] text-muted-foreground capitalize">{svc.type?.replace("_", " ")}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <Badge variant="outline" className="text-[10px] capitalize">{svc.plan}</Badge>
+                                          <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full ${svc.status === "active" ? "bg-green-500/10 text-green-400" : "bg-muted text-muted-foreground"}`}>
+                                            <span className={`h-1.5 w-1.5 rounded-full ${svc.status === "active" ? "bg-green-400" : "bg-muted-foreground"}`} />
+                                            {svc.status}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              <Button variant="outline" size="sm" onClick={() => fetchBilling(c.id)}>
+                                <RefreshCw className="h-3 w-3 mr-1.5" /> Refresh Billing
+                              </Button>
                             </div>
                           ) : (
-                            <p className="text-center py-8 text-muted-foreground text-sm">Loading billing info...</p>
+                            <div className="text-center py-8 text-muted-foreground text-sm">
+                              <CreditCard className="h-8 w-8 mx-auto mb-3 opacity-30" />
+                              <p>No billing data available</p>
+                            </div>
                           )}
                         </TabsContent>
                       </Tabs>
