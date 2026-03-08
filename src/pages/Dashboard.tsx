@@ -83,37 +83,30 @@ export default function Dashboard() {
         </div>
 
         {/* Connection Categories */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="glass-card rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Globe className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Frontend Deployment</h3>
+              <h3 className="font-semibold text-sm">Frontend</h3>
             </div>
             <p className="text-2xl font-bold mb-1">{stats.frontendConns}</p>
-            <p className="text-xs text-muted-foreground">Vercel, Netlify connections</p>
+            <p className="text-xs text-muted-foreground">Vercel connections</p>
           </div>
           <div className="glass-card rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Server className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Backend Deployment</h3>
+              <h3 className="font-semibold text-sm">Backend</h3>
             </div>
             <p className="text-2xl font-bold mb-1">{stats.backendConns}</p>
-            <p className="text-xs text-muted-foreground">Render, Railway connections</p>
+            <p className="text-xs text-muted-foreground">Render connections</p>
           </div>
-        </div>
-
-        {/* Coming Soon */}
-        <div className="glass-card rounded-xl p-5 mb-8">
-          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-primary" /> Coming Soon
-          </h3>
-          <div className="grid grid-cols-3 gap-3">
-            {["AWS", "Google Cloud", "Azure"].map((name) => (
-              <div key={name} className="rounded-lg border border-border/50 p-3 opacity-50">
-                <p className="text-sm font-medium">{name}</p>
-                <span className="text-[10px] font-mono text-muted-foreground">Coming Soon</span>
-              </div>
-            ))}
+          <div className="glass-card rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Cloud className="h-4 w-4 text-amber-400" />
+              <h3 className="font-semibold text-sm">AWS Cloud</h3>
+            </div>
+            <p className="text-2xl font-bold mb-1">{stats.awsConns}</p>
+            <p className="text-xs text-muted-foreground">AWS accounts connected</p>
           </div>
         </div>
 
