@@ -1344,7 +1344,7 @@ serve(async (req) => {
       return json({ success: true });
     }
 
-    // ── Fetch Render service logs ──
+    // ── Fetch service logs (Render + Vercel) ──
     if (action === "fetch-logs") {
       const { deploymentId: depId } = body;
       if (!depId) throw new Error("Missing deploymentId");
@@ -1352,46 +1352,130 @@ serve(async (req) => {
       if (!dep) throw new Error("Deployment not found");
       const connection = (dep as any).cloud_connections;
       if (!connection) throw new Error("Connection not found");
-      const RENDER_API = "https://api.render.com/v1";
-      const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
-      let serviceId = dep.deploy_id;
-      if (!serviceId && dep.live_url) {
-        const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
-        const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers: hdrs });
-        if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
-      }
-      if (!serviceId) throw new Error("Could not find Render service ID");
-      const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers: hdrs });
+
       let deployLogs: any[] = [];
-      if (deploysRes.ok && deploysRes.data?.length > 0) {
-        const latestId = deploysRes.data[0]?.deploy?.id || deploysRes.data[0]?.id;
-        if (latestId) {
-          const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestId}/logs`, { headers: hdrs });
-          if (logRes.ok && Array.isArray(logRes.data)) {
-            deployLogs = logRes.data.map((l: any) => ({ timestamp: l.timestamp || new Date().toISOString(), message: l.message || JSON.stringify(l), level: l.level || "info" }));
+      let serviceInfo: any = null;
+      let envKeys: any[] = [];
+
+      if (connection.provider === "render") {
+        const RENDER_API = "https://api.render.com/v1";
+        const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
+        let serviceId = dep.deploy_id;
+        if (!serviceId && dep.live_url) {
+          const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, "");
+          const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers: hdrs });
+          if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id;
+        }
+        if (serviceId) {
+          const svcRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}`, { headers: hdrs });
+          if (svcRes.ok) {
+            const svc = svcRes.data?.service || svcRes.data;
+            serviceInfo = { id: svc.id, name: svc.name, status: svc.suspended === "suspended" ? "suspended" : "active", type: svc.type || "web_service", runtime: svc.serviceDetails?.runtime || "node", plan: svc.serviceDetails?.plan || "free", region: svc.serviceDetails?.region || "oregon", createdAt: svc.createdAt, updatedAt: svc.updatedAt };
+          }
+          const envRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/env-vars`, { headers: hdrs });
+          if (envRes.ok && Array.isArray(envRes.data)) envKeys = envRes.data.map((e: any) => ({ key: e.envVar?.key || e.key || "unknown" }));
+          const deploysRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers: hdrs });
+          if (deploysRes.ok && deploysRes.data?.length > 0) {
+            const latestId = deploysRes.data[0]?.deploy?.id || deploysRes.data[0]?.id;
+            if (latestId) {
+              const logRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys/${latestId}/logs`, { headers: hdrs });
+              if (logRes.ok && Array.isArray(logRes.data)) deployLogs = logRes.data.map((l: any) => ({ timestamp: l.timestamp || new Date().toISOString(), message: l.message || JSON.stringify(l), level: l.level || "info" }));
+            }
           }
         }
+      } else if (connection.provider === "vercel") {
+        const vHeaders = { Authorization: `Bearer ${connection.token}` };
+        if (dep.deploy_id) {
+          const depRes = await safeFetchJson(`https://api.vercel.com/v13/deployments/${dep.deploy_id}`, { headers: vHeaders });
+          if (depRes.ok) {
+            const d = depRes.data;
+            serviceInfo = { id: d.id, name: d.name || d.project, status: d.readyState || "unknown", type: "deployment", runtime: d.framework || "static", plan: "hobby", region: d.regions?.join(", ") || "auto", createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : null, updatedAt: d.ready ? new Date(d.ready).toISOString() : null };
+          }
+          const evtRes = await safeFetchJson(`https://api.vercel.com/v3/deployments/${dep.deploy_id}/events`, { headers: vHeaders });
+          if (evtRes.ok && Array.isArray(evtRes.data)) deployLogs = evtRes.data.slice(-100).map((e: any) => ({ timestamp: e.created ? new Date(e.created).toISOString() : new Date().toISOString(), message: e.text || e.payload?.text || JSON.stringify(e.payload || e), level: e.type === "error" ? "error" : e.type === "warning" ? "warning" : "info" }));
+        }
+        const projName = dep.live_url?.replace(/^https?:\/\//, "").replace(/\.vercel\.app.*$/, "") || "";
+        if (projName) {
+          const envRes = await safeFetchJson(`https://api.vercel.com/v10/projects/${projName}/env`, { headers: vHeaders });
+          if (envRes.ok && Array.isArray(envRes.data?.envs)) envKeys = envRes.data.envs.map((e: any) => ({ key: e.key }));
+        }
       }
-      return json({ success: true, logs: deployLogs });
+      return json({ success: true, serviceInfo, logs: deployLogs, envKeys });
     }
 
-    // ── Fetch health ──
+    // ── Fetch health + deploy history ──
     if (action === "fetch-health") {
       const { deploymentId: depId } = body;
       if (!depId) throw new Error("Missing deploymentId");
       const { data: dep } = await supabase.from("deployments").select("*, cloud_connections(*)").eq("id", depId).single();
       if (!dep) throw new Error("Deployment not found");
+      const connection = (dep as any).cloud_connections;
       let healthCheck = { reachable: false, statusCode: 0, responseTime: 0, error: "" };
       if (dep.live_url) {
         const start = Date.now();
-        try {
-          const hRes = await fetch(dep.live_url, { signal: AbortSignal.timeout(15000) });
-          healthCheck = { reachable: hRes.ok, statusCode: hRes.status, responseTime: Date.now() - start, error: hRes.ok ? "" : `HTTP ${hRes.status}` };
-        } catch (e: any) {
-          healthCheck = { reachable: false, statusCode: 0, responseTime: Date.now() - start, error: e.message };
+        try { const hRes = await fetch(dep.live_url, { signal: AbortSignal.timeout(15000) }); healthCheck = { reachable: hRes.ok, statusCode: hRes.status, responseTime: Date.now() - start, error: hRes.ok ? "" : `HTTP ${hRes.status}` }; } catch (e: any) { healthCheck = { reachable: false, statusCode: 0, responseTime: Date.now() - start, error: e.message }; }
+      }
+      let deployHistory: any[] = [];
+      if (connection) {
+        if (connection.provider === "render") {
+          const RENDER_API = "https://api.render.com/v1"; const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
+          let serviceId = dep.deploy_id;
+          if (!serviceId && dep.live_url) { const svcName = dep.live_url.replace(/^https?:\/\//, "").replace(/\.onrender\.com.*$/, ""); const listRes = await safeFetchJson(`${RENDER_API}/services?name=${encodeURIComponent(svcName)}&limit=1`, { headers: hdrs }); if (listRes.ok && listRes.data?.length > 0) serviceId = listRes.data[0].service?.id; }
+          if (serviceId) { const histRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=10`, { headers: hdrs }); if (histRes.ok && Array.isArray(histRes.data)) deployHistory = histRes.data.map((d: any) => { const deploy = d.deploy || d; return { id: deploy.id, status: deploy.status, createdAt: deploy.createdAt, finishedAt: deploy.finishedAt, commit: deploy.commit?.message || "" }; }); }
+        } else if (connection.provider === "vercel") {
+          const vHeaders = { Authorization: `Bearer ${connection.token}` }; const projName = dep.live_url?.replace(/^https?:\/\//, "").replace(/\.vercel\.app.*$/, "") || "";
+          if (projName) { const histRes = await safeFetchJson(`https://api.vercel.com/v6/deployments?projectId=${projName}&limit=10`, { headers: vHeaders }); if (histRes.ok && Array.isArray(histRes.data?.deployments)) deployHistory = histRes.data.deployments.map((d: any) => ({ id: d.uid, status: d.readyState === "READY" ? "live" : d.readyState?.toLowerCase() || "unknown", createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : "", finishedAt: d.ready ? new Date(d.ready).toISOString() : "", commit: d.meta?.githubCommitMessage || "" })); }
         }
       }
-      return json({ success: true, healthCheck });
+      return json({ success: true, healthCheck, deployHistory });
+    }
+
+    // ── Fetch provider info for a connection ──
+    if (action === "fetch-provider-info") {
+      const { connectionId } = body;
+      if (!connectionId) throw new Error("Missing connectionId");
+      const { data: conn } = await supabase.from("cloud_connections").select("*").eq("id", connectionId).single();
+      if (!conn) throw new Error("Connection not found");
+      let providerInfo: any = { projects: [], user: null };
+      if (conn.provider === "vercel") {
+        const vHeaders = { Authorization: `Bearer ${conn.token}` };
+        const userRes = await safeFetchJson("https://api.vercel.com/v2/user", { headers: vHeaders });
+        if (userRes.ok) providerInfo.user = { username: userRes.data.user?.username || userRes.data.username, email: userRes.data.user?.email || userRes.data.email, name: userRes.data.user?.name || userRes.data.name };
+        const projRes = await safeFetchJson("https://api.vercel.com/v9/projects?limit=20", { headers: vHeaders });
+        if (projRes.ok && Array.isArray(projRes.data?.projects)) providerInfo.projects = projRes.data.projects.map((p: any) => ({ id: p.id, name: p.name, framework: p.framework, createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : null, updatedAt: p.updatedAt ? new Date(p.updatedAt).toISOString() : null, url: p.latestDeployments?.[0]?.url ? `https://${p.latestDeployments[0].url}` : null, state: p.latestDeployments?.[0]?.readyState || null }));
+      } else if (conn.provider === "render") {
+        const RENDER_API = "https://api.render.com/v1"; const hdrs = { Authorization: `Bearer ${conn.token}`, "Content-Type": "application/json" };
+        const ownerRes = await safeFetchJson(`${RENDER_API}/owners`, { headers: hdrs });
+        if (ownerRes.ok && ownerRes.data?.length > 0) { const owner = ownerRes.data[0]?.owner || ownerRes.data[0]; providerInfo.user = { username: owner.name || owner.id, email: owner.email || "", name: owner.name }; }
+        const svcRes = await safeFetchJson(`${RENDER_API}/services?limit=20`, { headers: hdrs });
+        if (svcRes.ok && Array.isArray(svcRes.data)) providerInfo.projects = svcRes.data.map((s: any) => { const svc = s.service || s; return { id: svc.id, name: svc.name, type: svc.type, runtime: svc.serviceDetails?.runtime || "node", plan: svc.serviceDetails?.plan || "free", region: svc.serviceDetails?.region || "oregon", status: svc.suspended === "suspended" ? "suspended" : "active", createdAt: svc.createdAt, updatedAt: svc.updatedAt, url: svc.serviceDetails?.url ? `https://${svc.serviceDetails.url}` : null }; });
+      }
+      return json({ success: true, providerInfo });
+    }
+
+    // ── Fetch billing info ──
+    if (action === "fetch-billing") {
+      const { connectionId } = body;
+      if (!connectionId) throw new Error("Missing connectionId");
+      const { data: conn } = await supabase.from("cloud_connections").select("*").eq("id", connectionId).single();
+      if (!conn) throw new Error("Connection not found");
+      let billing: any = { plan: "free", usage: [], summary: null };
+      if (conn.provider === "vercel") {
+        const vHeaders = { Authorization: `Bearer ${conn.token}` };
+        const userRes = await safeFetchJson("https://api.vercel.com/v2/user", { headers: vHeaders });
+        if (userRes.ok) { const u = userRes.data.user || userRes.data; billing.plan = u.billing?.plan || "hobby"; billing.summary = { plan: billing.plan, period: "current", projectCount: 0, bandwidthUsed: "Check Vercel dashboard", buildMinutes: "Check Vercel dashboard" }; }
+        const projRes = await safeFetchJson("https://api.vercel.com/v9/projects?limit=100", { headers: vHeaders });
+        if (projRes.ok && billing.summary) billing.summary.projectCount = projRes.data?.projects?.length || 0;
+      } else if (conn.provider === "render") {
+        const RENDER_API = "https://api.render.com/v1"; const hdrs = { Authorization: `Bearer ${conn.token}`, "Content-Type": "application/json" };
+        const svcRes = await safeFetchJson(`${RENDER_API}/services?limit=100`, { headers: hdrs });
+        const services = svcRes.ok ? (svcRes.data || []) : [];
+        let freeCount = 0, paidCount = 0;
+        const usage = services.map((s: any) => { const svc = s.service || s; const plan = svc.serviceDetails?.plan || "free"; if (plan === "free") freeCount++; else paidCount++; return { name: svc.name, type: svc.type, plan, status: svc.suspended === "suspended" ? "suspended" : "active" }; });
+        billing.plan = paidCount > 0 ? "paid" : "free"; billing.usage = usage;
+        billing.summary = { plan: billing.plan, period: "current", serviceCount: services.length, freeServices: freeCount, paidServices: paidCount, note: "Free tier: 750 hrs/month, 100 GB bandwidth." };
+      }
+      return json({ success: true, billing });
     }
 
     // ── Delete deployment ──
