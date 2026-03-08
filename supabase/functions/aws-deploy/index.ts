@@ -683,7 +683,9 @@ serve(async (req) => {
 
       } catch (e: any) {
         await supabase.from("aws_infrastructure").update({ status: "error", error_message: e.message }).eq("id", infra.id);
-        await supabase.from("deployments").update({ status: "error", error_message: e.message }).eq("project_id", projectId).eq("provider", "aws").order("created_at", { ascending: false }).limit(1);
+        if (deploymentId) {
+          await supabase.from("deployments").update({ status: "error", error_message: e.message }).eq("id", deploymentId);
+        }
         return json({ success: false, error: e.message });
       }
     }
