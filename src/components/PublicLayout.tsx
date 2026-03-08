@@ -70,8 +70,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
               <div className="space-y-2">
                 <Link to="/about" className="block text-xs text-muted-foreground hover:text-foreground transition-colors">About</Link>
                 <Link to="/reviews" className="block text-xs text-muted-foreground hover:text-foreground transition-colors">Reviews</Link>
-                <Link to="/contact" className="block text-xs text-muted-foreground hover:text-foreground transition-colors">Contact</Link>
-                <Link to="/support" className="block text-xs text-muted-foreground hover:text-foreground transition-colors">Support</Link>
+                <Link to="/contact" className="block text-xs text-muted-foreground hover:text-foreground transition-colors">Contact & Support</Link>
               </div>
             </div>
             <div>
