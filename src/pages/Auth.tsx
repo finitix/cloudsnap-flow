@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Cloud, Zap, ArrowRight } from "lucide-react";
+import { Cloud, Zap, ArrowRight, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Auth() {
