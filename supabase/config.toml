@@ -2,3 +2,6 @@ project_id = "nzojkgxhkdfipxoofokp"
 
 [functions.deploy-project]
 verify_jwt = false
+
+[functions.aws-deploy]
+verify_jwt = false
