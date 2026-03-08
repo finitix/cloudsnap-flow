@@ -18,7 +18,13 @@ import Reviews from "./pages/Reviews";
 import ContactSupport from "./pages/ContactSupport";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
-import Admin from "./pages/Admin";
+import AdminDashboard from "./pages/AdminDashboard";
+import AdminUsers from "./pages/AdminUsers";
+import AdminProjects from "./pages/AdminProjects";
+import AdminDeployments from "./pages/AdminDeployments";
+import AdminConnections from "./pages/AdminConnections";
+import AdminReviews from "./pages/AdminReviews";
+import AdminMessages from "./pages/AdminMessages";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -54,7 +60,13 @@ const AppRoutes = () => (
     <Route path="/deployments" element={<ProtectedRoute><Deployments /></ProtectedRoute>} />
     <Route path="/monitoring" element={<ProtectedRoute><Monitoring /></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-    <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+    <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+    <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
+    <Route path="/admin/projects" element={<ProtectedRoute><AdminProjects /></ProtectedRoute>} />
+    <Route path="/admin/deployments" element={<ProtectedRoute><AdminDeployments /></ProtectedRoute>} />
+    <Route path="/admin/connections" element={<ProtectedRoute><AdminConnections /></ProtectedRoute>} />
+    <Route path="/admin/reviews" element={<ProtectedRoute><AdminReviews /></ProtectedRoute>} />
+    <Route path="/admin/messages" element={<ProtectedRoute><AdminMessages /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
