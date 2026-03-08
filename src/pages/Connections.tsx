@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
   Plus, Trash2, ExternalLink, Server, Globe, Cloud, Lock, RefreshCw,
   ChevronDown, ChevronUp, User, FolderGit2, CreditCard, Activity, Loader2,
-  Shield, Key, MapPin, AlertTriangle, CheckCircle
+  Shield, Key, MapPin, AlertTriangle, CheckCircle, ArrowRight, Clock
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,6 +30,37 @@ const AWS_REGIONS = [
   { id: "eu-west-1", name: "EU (Ireland)", flag: "🇪🇺" },
   { id: "ap-south-1", name: "Asia Pacific (Mumbai)", flag: "🇮🇳" },
   { id: "ap-southeast-1", name: "Asia Pacific (Singapore)", flag: "🇸🇬" },
+];
+
+const AWS_SETUP_STEPS = [
+  {
+    step: 1,
+    title: "Create an AWS Account",
+    description: "Sign up at aws.amazon.com. Students can use AWS Educate for free credits.",
+    link: "https://aws.amazon.com/free/",
+  },
+  {
+    step: 2,
+    title: "Create an IAM User",
+    description: "Go to IAM → Users → Create User. Attach 'AdministratorAccess' or custom policy with EC2, VPC, RDS permissions.",
+    link: "https://console.aws.amazon.com/iam/home#/users",
+  },
+  {
+    step: 3,
+    title: "Generate Access Keys",
+    description: "Select your IAM user → Security credentials → Create access key → Choose 'Application running outside AWS'.",
+    link: "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html",
+  },
+  {
+    step: 4,
+    title: "Copy & Paste Keys",
+    description: "Copy your Access Key ID and Secret Access Key. Paste them in the form above and click 'Validate Credentials'.",
+  },
+  {
+    step: 5,
+    title: "Select Region & Connect",
+    description: "Choose your preferred AWS region (us-east-1 recommended for Free Tier). Click 'Connect AWS' to finish.",
+  },
 ];
 
 export default function Connections() {
@@ -65,7 +96,6 @@ export default function Connections() {
     if (!user) return;
     const { data } = await supabase.from("cloud_connections").select("*").order("connected_at", { ascending: false });
     setConnections(data || []);
-    // Load AWS connections
     const { data: awsData } = await supabase.from("aws_connections").select("*").order("created_at", { ascending: false });
     setAwsConnections(awsData || []);
   };
@@ -91,7 +121,6 @@ export default function Connections() {
     finally { setLoading(false); }
   };
 
-  // ── AWS Validate ──
   const handleValidateAws = async () => {
     if (!awsAccessKey || !awsSecretKey) return;
     setAwsValidating(true);
@@ -101,41 +130,29 @@ export default function Connections() {
         body: { action: "validate-aws", accessKeyId: awsAccessKey, secretAccessKey: awsSecretKey, region: awsRegion },
       });
       if (error) throw error;
-      if (data?.success) {
-        setAwsValidated(true);
-        toast.success("AWS credentials validated!");
-      } else {
-        toast.error(data?.error || "Invalid credentials");
-      }
+      if (data?.success) { setAwsValidated(true); toast.success("AWS credentials validated!"); }
+      else toast.error(data?.error || "Invalid credentials");
     } catch (err: any) { toast.error(err.message); }
     finally { setAwsValidating(false); }
   };
 
-  // ── AWS Connect ──
   const handleConnectAws = async () => {
     if (!awsAccessKey || !awsSecretKey) return;
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("aws-deploy", {
         body: {
-          action: "connect-aws",
-          accessKeyId: awsAccessKey,
-          secretAccessKey: awsSecretKey,
-          region: awsRegion,
-          displayName: awsDisplayName || "My AWS Account",
-          connectionType: awsConnType,
-          roleArn: awsRoleArn || undefined,
+          action: "connect-aws", accessKeyId: awsAccessKey, secretAccessKey: awsSecretKey,
+          region: awsRegion, displayName: awsDisplayName || "My AWS Account",
+          connectionType: awsConnType, roleArn: awsRoleArn || undefined,
         },
       });
       if (error) throw error;
       if (data?.success) {
         toast.success("AWS account connected!");
-        setAwsOpen(false);
-        setAwsAccessKey(""); setAwsSecretKey(""); setAwsDisplayName(""); setAwsValidated(false);
+        setAwsOpen(false); setAwsAccessKey(""); setAwsSecretKey(""); setAwsDisplayName(""); setAwsValidated(false);
         load();
-      } else {
-        toast.error(data?.error || "Failed to connect");
-      }
+      } else toast.error(data?.error || "Failed to connect");
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
   };
@@ -205,14 +222,12 @@ export default function Connections() {
   const getProviderIcon = (provider: string) => {
     if (provider === "vercel") return <Globe className="h-5 w-5" />;
     if (provider === "render") return <Server className="h-5 w-5" />;
-    if (provider === "aws") return <Cloud className="h-5 w-5" />;
     return <Cloud className="h-5 w-5" />;
   };
 
   const getCategoryLabel = (provider: string) => {
     if (provider === "vercel") return "Frontend";
     if (provider === "render") return "Backend";
-    if (provider === "aws") return "AWS Cloud";
     return "Cloud";
   };
 
@@ -224,153 +239,248 @@ export default function Connections() {
             <h1 className="text-2xl font-bold">Cloud Connections</h1>
             <p className="text-muted-foreground text-sm mt-1">Connect and manage your deployment platforms</p>
           </div>
-          <div className="flex gap-2">
-            <Dialog open={awsOpen} onOpenChange={setAwsOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline"><Cloud className="h-4 w-4 mr-2" />Connect AWS</Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader><DialogTitle className="flex items-center gap-2"><Cloud className="h-5 w-5 text-primary" /> Connect AWS Account</DialogTitle></DialogHeader>
-                <div className="space-y-4 mt-4">
-                  <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground flex items-start gap-2">
-                    <Shield className="h-4 w-4 mt-0.5 text-primary shrink-0" />
-                    <span>Your credentials are stored securely and only used for infrastructure provisioning. We recommend creating an IAM user with limited permissions.</span>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-2" />Connect Provider</Button>
+            <DialogContent className="max-w-lg">
+              <DialogHeader><DialogTitle>Connect Cloud Provider</DialogTitle></DialogHeader>
+              <Tabs defaultValue="frontend" className="mt-4">
+                <TabsList className="w-full">
+                  <TabsTrigger value="frontend" className="flex-1"><Globe className="h-4 w-4 mr-2" />Frontend</TabsTrigger>
+                  <TabsTrigger value="backend" className="flex-1"><Server className="h-4 w-4 mr-2" />Backend</TabsTrigger>
+                </TabsList>
+                <TabsContent value="frontend" className="mt-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    {frontendProviders.map((p) => (
+                      <button key={p.id} onClick={() => setSelectedProvider(p.id)} className={`p-4 rounded-xl border text-left transition-all ${selectedProvider === p.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}>
+                        <p className="font-semibold text-sm">{p.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{p.description}</p>
+                      </button>
+                    ))}
                   </div>
-
+                </TabsContent>
+                <TabsContent value="backend" className="mt-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    {backendProviders.map((p) => (
+                      <button key={p.id} onClick={() => setSelectedProvider(p.id)} className={`p-4 rounded-xl border text-left transition-all ${selectedProvider === p.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}>
+                        <p className="font-semibold text-sm">{p.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{p.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </TabsContent>
+              </Tabs>
+              {selectedProvider && selectedProviderData && (
+                <div className="space-y-4 mt-4 pt-4 border-t border-border">
                   <div className="space-y-2">
                     <Label>Display Name</Label>
-                    <Input value={awsDisplayName} onChange={(e) => setAwsDisplayName(e.target.value)} placeholder="My AWS Account" />
+                    <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={`My ${selectedProviderData.name}`} />
                   </div>
-
                   <div className="space-y-2">
-                    <Label>Connection Type</Label>
-                    <Select value={awsConnType} onValueChange={setAwsConnType}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="iam_keys">IAM Access Keys</SelectItem>
-                        <SelectItem value="assume_role">Assume Role (Recommended)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label className="flex items-center gap-1"><Key className="h-3 w-3" /> Access Key ID</Label>
-                      <Input type="password" value={awsAccessKey} onChange={(e) => { setAwsAccessKey(e.target.value); setAwsValidated(false); }} placeholder="AKIA..." />
+                    <div className="flex items-center justify-between">
+                      <Label>API Token</Label>
+                      <a href={selectedProviderData.tokenUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
+                        Get token <ExternalLink className="h-3 w-3" />
+                      </a>
                     </div>
-                    <div className="space-y-2">
-                      <Label className="flex items-center gap-1"><Lock className="h-3 w-3" /> Secret Access Key</Label>
-                      <Input type="password" value={awsSecretKey} onChange={(e) => { setAwsSecretKey(e.target.value); setAwsValidated(false); }} placeholder="••••••••" />
-                    </div>
+                    <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Paste your token here" />
                   </div>
-
-                  {awsConnType === "assume_role" && (
-                    <div className="space-y-2">
-                      <Label>Role ARN</Label>
-                      <Input value={awsRoleArn} onChange={(e) => setAwsRoleArn(e.target.value)} placeholder="arn:aws:iam::123456789:role/CloudsnapRole" />
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1"><MapPin className="h-3 w-3" /> Default Region</Label>
-                    <Select value={awsRegion} onValueChange={setAwsRegion}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {AWS_REGIONS.map(r => (
-                          <SelectItem key={r.id} value={r.id}>{r.flag} {r.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={handleValidateAws} disabled={awsValidating || !awsAccessKey || !awsSecretKey} className="flex-1">
-                      {awsValidating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Validating...</> :
-                       awsValidated ? <><CheckCircle className="h-4 w-4 mr-2 text-green-400" /> Validated</> :
-                       <><Shield className="h-4 w-4 mr-2" /> Validate Credentials</>}
-                    </Button>
-                    <Button onClick={handleConnectAws} disabled={loading || !awsValidated} className="flex-1">
-                      {loading ? "Connecting..." : "Connect AWS"}
-                    </Button>
-                  </div>
-
-                  <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html" target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
-                    How to create AWS access keys <ExternalLink className="h-3 w-3" />
-                  </a>
+                  <Button onClick={handleConnect} disabled={loading || !token} className="w-full">
+                    {loading ? "Connecting..." : `Connect ${selectedProviderData.name}`}
+                  </Button>
                 </div>
-              </DialogContent>
-            </Dialog>
+              )}
+            </DialogContent>
+          </Dialog>
+        </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild>
-                <Button><Plus className="h-4 w-4 mr-2" />Connect Cloud</Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader><DialogTitle>Connect Cloud Provider</DialogTitle></DialogHeader>
-                <Tabs defaultValue="frontend" className="mt-4">
-                  <TabsList className="w-full">
-                    <TabsTrigger value="frontend" className="flex-1"><Globe className="h-4 w-4 mr-2" />Frontend</TabsTrigger>
-                    <TabsTrigger value="backend" className="flex-1"><Server className="h-4 w-4 mr-2" />Backend</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="frontend" className="mt-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      {frontendProviders.map((p) => (
-                        <button key={p.id} onClick={() => setSelectedProvider(p.id)} className={`p-4 rounded-xl border text-left transition-all ${selectedProvider === p.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}>
-                          <p className="font-semibold text-sm">{p.name}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{p.description}</p>
-                        </button>
-                      ))}
-                    </div>
-                  </TabsContent>
-                  <TabsContent value="backend" className="mt-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      {backendProviders.map((p) => (
-                        <button key={p.id} onClick={() => setSelectedProvider(p.id)} className={`p-4 rounded-xl border text-left transition-all ${selectedProvider === p.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}>
-                          <p className="font-semibold text-sm">{p.name}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{p.description}</p>
-                        </button>
-                      ))}
-                    </div>
-                  </TabsContent>
-                </Tabs>
-                {selectedProvider && selectedProviderData && (
-                  <div className="space-y-4 mt-4 pt-4 border-t border-border">
-                    <div className="space-y-2">
-                      <Label>Display Name</Label>
-                      <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={`My ${selectedProviderData.name}`} />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label>API Token</Label>
-                        <a href={selectedProviderData.tokenUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
-                          Get token <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
-                      <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Paste your token here" />
-                    </div>
-                    <Button onClick={handleConnect} disabled={loading || !token} className="w-full">
-                      {loading ? "Connecting..." : `Connect ${selectedProviderData.name}`}
-                    </Button>
-                  </div>
-                )}
-              </DialogContent>
-            </Dialog>
+        {/* ═══ Cloud Provider Cards ═══ */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          {/* AWS — Live */}
+          <div
+            className="glass-card rounded-xl p-6 cursor-pointer border-2 border-transparent hover:border-primary/40 transition-all group"
+            onClick={() => setAwsOpen(true)}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="h-12 w-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                <Cloud className="h-6 w-6 text-amber-400" />
+              </div>
+              <Badge className="bg-green-500/15 text-green-400 text-[10px]">
+                <CheckCircle className="h-3 w-3 mr-1" /> Live
+              </Badge>
+            </div>
+            <h3 className="font-bold text-lg mb-1">Amazon Web Services</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              Deploy EC2, RDS, VPC infrastructure with Free Tier optimization
+            </p>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1"><Server className="h-3 w-3" /> EC2</span>
+              <span>•</span>
+              <span>RDS</span>
+              <span>•</span>
+              <span>VPC</span>
+              <span>•</span>
+              <span>S3</span>
+            </div>
+            {awsConnections.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-border">
+                <p className="text-xs text-green-400 font-medium">{awsConnections.length} account{awsConnections.length > 1 ? "s" : ""} connected</p>
+              </div>
+            )}
+            <Button variant="outline" size="sm" className="w-full mt-4 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+              <Plus className="h-3.5 w-3.5 mr-1.5" /> Connect AWS
+            </Button>
+          </div>
+
+          {/* GCP — Coming Soon */}
+          <div className="glass-card rounded-xl p-6 opacity-60 cursor-not-allowed relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-transparent to-muted/20" />
+            <div className="flex items-center justify-between mb-4 relative z-10">
+              <div className="h-12 w-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                <Cloud className="h-6 w-6 text-blue-400" />
+              </div>
+              <Badge className="bg-muted text-muted-foreground text-[10px]">
+                <Clock className="h-3 w-3 mr-1" /> Coming Soon
+              </Badge>
+            </div>
+            <h3 className="font-bold text-lg mb-1 relative z-10">Google Cloud Platform</h3>
+            <p className="text-xs text-muted-foreground mb-4 relative z-10">
+              Deploy to GCE, Cloud Run, Cloud SQL with Always Free tier
+            </p>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground relative z-10">
+              <span>GCE</span><span>•</span><span>Cloud Run</span><span>•</span><span>Cloud SQL</span>
+            </div>
+            <Button variant="outline" size="sm" className="w-full mt-4 relative z-10" disabled>
+              Coming Soon
+            </Button>
+          </div>
+
+          {/* Azure — Coming Soon */}
+          <div className="glass-card rounded-xl p-6 opacity-60 cursor-not-allowed relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-transparent to-muted/20" />
+            <div className="flex items-center justify-between mb-4 relative z-10">
+              <div className="h-12 w-12 rounded-xl bg-cyan-500/10 flex items-center justify-center">
+                <Cloud className="h-6 w-6 text-cyan-400" />
+              </div>
+              <Badge className="bg-muted text-muted-foreground text-[10px]">
+                <Clock className="h-3 w-3 mr-1" /> Coming Soon
+              </Badge>
+            </div>
+            <h3 className="font-bold text-lg mb-1 relative z-10">Microsoft Azure</h3>
+            <p className="text-xs text-muted-foreground mb-4 relative z-10">
+              Deploy to Azure VMs, App Service, Azure SQL with free tier
+            </p>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground relative z-10">
+              <span>VMs</span><span>•</span><span>App Service</span><span>•</span><span>Azure SQL</span>
+            </div>
+            <Button variant="outline" size="sm" className="w-full mt-4 relative z-10" disabled>
+              Coming Soon
+            </Button>
           </div>
         </div>
 
-        {connections.length === 0 && awsConnections.length === 0 ? (
-          <div className="glass-card rounded-xl p-16 text-center">
-            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <Plus className="h-5 w-5 text-primary" />
+        {/* ═══ AWS Connect Dialog ═══ */}
+        <Dialog open={awsOpen} onOpenChange={setAwsOpen}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><Cloud className="h-5 w-5 text-amber-400" /> Connect AWS Account</DialogTitle></DialogHeader>
+            <div className="space-y-4 mt-4">
+              <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground flex items-start gap-2">
+                <Shield className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                <span>Your credentials are stored securely and only used for infrastructure provisioning. We recommend creating an IAM user with limited permissions.</span>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Display Name</Label>
+                <Input value={awsDisplayName} onChange={(e) => setAwsDisplayName(e.target.value)} placeholder="My AWS Account" />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Connection Type</Label>
+                <Select value={awsConnType} onValueChange={setAwsConnType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="iam_keys">IAM Access Keys</SelectItem>
+                    <SelectItem value="assume_role">Assume Role (Recommended)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1"><Key className="h-3 w-3" /> Access Key ID</Label>
+                  <Input type="password" value={awsAccessKey} onChange={(e) => { setAwsAccessKey(e.target.value); setAwsValidated(false); }} placeholder="AKIA..." />
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1"><Lock className="h-3 w-3" /> Secret Access Key</Label>
+                  <Input type="password" value={awsSecretKey} onChange={(e) => { setAwsSecretKey(e.target.value); setAwsValidated(false); }} placeholder="••••••••" />
+                </div>
+              </div>
+
+              {awsConnType === "assume_role" && (
+                <div className="space-y-2">
+                  <Label>Role ARN</Label>
+                  <Input value={awsRoleArn} onChange={(e) => setAwsRoleArn(e.target.value)} placeholder="arn:aws:iam::123456789:role/CloudsnapRole" />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1"><MapPin className="h-3 w-3" /> Default Region</Label>
+                <Select value={awsRegion} onValueChange={setAwsRegion}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {AWS_REGIONS.map(r => (
+                      <SelectItem key={r.id} value={r.id}>{r.flag} {r.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={handleValidateAws} disabled={awsValidating || !awsAccessKey || !awsSecretKey} className="flex-1">
+                  {awsValidating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Validating...</> :
+                   awsValidated ? <><CheckCircle className="h-4 w-4 mr-2 text-green-400" /> Validated</> :
+                   <><Shield className="h-4 w-4 mr-2" /> Validate Credentials</>}
+                </Button>
+                <Button onClick={handleConnectAws} disabled={loading || !awsValidated} className="flex-1">
+                  {loading ? "Connecting..." : "Connect AWS"}
+                </Button>
+              </div>
             </div>
-            <h3 className="font-semibold mb-2">No connections yet</h3>
-            <p className="text-sm text-muted-foreground mb-4">Connect AWS, Vercel, or Render to start deploying</p>
-            <div className="flex gap-2 justify-center">
-              <Button variant="outline" onClick={() => setAwsOpen(true)}><Cloud className="h-4 w-4 mr-2" />Connect AWS</Button>
-              <Button variant="outline" onClick={() => setOpen(true)}>Connect Cloud</Button>
-            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* ═══ AWS Step-by-Step Guide ═══ */}
+        <div className="glass-card rounded-xl p-6 mb-8">
+          <h3 className="font-semibold text-sm mb-1 flex items-center gap-2">
+            <Cloud className="h-4 w-4 text-amber-400" />
+            How to Connect AWS — Step by Step
+          </h3>
+          <p className="text-xs text-muted-foreground mb-5">Follow these steps to connect your AWS account to Cloudsnap Studio</p>
+          <div className="space-y-4">
+            {AWS_SETUP_STEPS.map((s) => (
+              <div key={s.step} className="flex gap-4 items-start">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">
+                  {s.step}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-semibold">{s.title}</h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">{s.description}</p>
+                  {s.link && (
+                    <a href={s.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1">
+                      Open in AWS <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+                {s.step < AWS_SETUP_STEPS.length && <ArrowRight className="h-4 w-4 text-muted-foreground/30 mt-2 shrink-0 hidden md:block" />}
+              </div>
+            ))}
           </div>
-        ) : (
+          <Button variant="outline" className="mt-5" onClick={() => setAwsOpen(true)}>
+            <Cloud className="h-4 w-4 mr-2" /> Start Connecting AWS
+          </Button>
+        </div>
+
+        {/* ═══ Connected Accounts ═══ */}
+        {(connections.length > 0 || awsConnections.length > 0) && (
           <div className="space-y-6">
             {/* AWS Connections */}
             {awsConnections.length > 0 && (
@@ -542,6 +652,16 @@ export default function Connections() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {connections.length === 0 && awsConnections.length === 0 && (
+          <div className="glass-card rounded-xl p-12 text-center">
+            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <Plus className="h-5 w-5 text-primary" />
+            </div>
+            <h3 className="font-semibold mb-2">No connections yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">Click on a cloud provider above to get started</p>
           </div>
         )}
 
