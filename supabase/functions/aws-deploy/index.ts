@@ -453,33 +453,37 @@ serve(async (req) => {
         }).eq("id", infra.id);
 
         // ── Step 4: Security Group ──
+        const safeName = project.name.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
         const sgRes = await ec2Action(creds, "CreateSecurityGroup", {
-          GroupName: `cloudsnap-${project.name}-${Date.now()}`,
-          Description: `Security group for ${project.name}`,
+          GroupName: `cloudsnap-${safeName}-${Date.now()}`,
+          Description: `Security group for ${safeName}`,
           VpcId: vpcId,
         });
         const sgId = extractTag(sgRes.rawText, "groupId");
 
-        if (sgId) {
-          // Allow HTTP
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "80", ToPort: "80", "CidrIp": "0.0.0.0/0",
-          });
-          // Allow HTTPS
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "443", ToPort: "443", "CidrIp": "0.0.0.0/0",
-          });
-          // Allow SSH (for debugging)
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "22", ToPort: "22", "CidrIp": "0.0.0.0/0",
-          });
-          // Allow app port
-          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
-            GroupId: sgId, IpProtocol: "tcp", FromPort: "3000", ToPort: "9000", "CidrIp": "0.0.0.0/0",
-          });
-
-          await supabase.from("aws_infrastructure").update({ security_group_id: sgId, status: "launching_compute" }).eq("id", infra.id);
+        if (!sgId) {
+          console.error("Security group creation failed:", sgRes.rawText);
+          throw new Error("Failed to create security group: " + (sgRes.rawText.substring(0, 200)));
         }
+
+        // Allow HTTP
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "80", ToPort: "80", CidrIp: "0.0.0.0/0",
+        });
+        // Allow HTTPS
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "443", ToPort: "443", CidrIp: "0.0.0.0/0",
+        });
+        // Allow SSH (for debugging)
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "22", ToPort: "22", CidrIp: "0.0.0.0/0",
+        });
+        // Allow app ports
+        await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+          GroupId: sgId, IpProtocol: "tcp", FromPort: "3000", ToPort: "9000", CidrIp: "0.0.0.0/0",
+        });
+
+        await supabase.from("aws_infrastructure").update({ security_group_id: sgId, status: "launching_compute" }).eq("id", infra.id);
 
         // ── Step 5: Launch EC2 Instance ──
         // Get latest Amazon Linux 2 AMI
