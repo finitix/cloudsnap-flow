@@ -16,6 +16,10 @@ export default function AdminDashboard() {
   });
   const [recentUsers, setRecentUsers] = useState<any[]>([]);
   const [recentDeployments, setRecentDeployments] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [allDeployments, setAllDeployments] = useState<any[]>([]);
+  const [allFeedback, setAllFeedback] = useState<any[]>([]);
+  const [allContacts, setAllContacts] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
