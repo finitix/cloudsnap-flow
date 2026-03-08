@@ -661,8 +661,10 @@ serve(async (req) => {
           estimated_monthly_cost: totalCost,
         }).eq("id", infra.id);
 
-        // Update deployment status
-        await supabase.from("deployments").update({ status: "live" }).eq("project_id", projectId).eq("provider", "aws").order("created_at", { ascending: false }).limit(1);
+        // Update deployment status using deployment ID
+        if (deploymentId) {
+          await supabase.from("deployments").update({ status: "live" }).eq("id", deploymentId);
+        }
 
         return json({
           success: true,
