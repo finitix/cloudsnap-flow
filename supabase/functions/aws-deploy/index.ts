@@ -439,6 +439,8 @@ serve(async (req) => {
         }
 
         // ── Step 3: Create Subnets ──
+        // Use a random offset (10-250) for CIDR to avoid conflicts when reusing VPC
+        const cidrOffset = Math.floor(Math.random() * 240) + 10;
         // Get available AZs
         const azRes = await ec2Action(creds, "DescribeAvailabilityZones", { "Filter.1.Name": "state", "Filter.1.Value.1": "available" });
         const azText = azRes.rawText;
@@ -449,21 +451,40 @@ serve(async (req) => {
 
         // Public subnet
         const pubSubRes = await ec2Action(creds, "CreateSubnet", {
-          VpcId: vpcId, CidrBlock: "10.0.1.0/24", AvailabilityZone: az1,
+          VpcId: vpcId, CidrBlock: `10.0.${cidrOffset}.0/24`, AvailabilityZone: az1,
         });
-        const pubSubId = extractTag(pubSubRes.rawText, "subnetId");
+        let pubSubId = extractTag(pubSubRes.rawText, "subnetId");
+        
+        // If CIDR conflict, try to find existing subnets in this VPC
+        if (!pubSubId && pubSubRes.rawText?.includes("InvalidSubnet.Conflict")) {
+          console.log("Subnet CIDR conflict, looking for existing subnets...");
+          const descSubRes = await ec2Action(creds, "DescribeSubnets", {
+            "Filter.1.Name": "vpc-id", "Filter.1.Value.1": vpcId,
+          });
+          const subnetIds = (descSubRes.rawText.match(/<subnetId>([^<]+)<\/subnetId>/g) || [])
+            .map(m => m.replace(/<\/?subnetId>/g, ""));
+          pubSubId = subnetIds[0] || "";
+        }
 
         // Private subnet
         const privSubRes = await ec2Action(creds, "CreateSubnet", {
-          VpcId: vpcId, CidrBlock: "10.0.2.0/24", AvailabilityZone: az1,
+          VpcId: vpcId, CidrBlock: `10.0.${cidrOffset + 1}.0/24`, AvailabilityZone: az1,
         });
-        const privSubId = extractTag(privSubRes.rawText, "subnetId");
+        let privSubId = extractTag(privSubRes.rawText, "subnetId");
+        if (!privSubId && privSubRes.rawText?.includes("InvalidSubnet.Conflict")) {
+          const descSubRes = await ec2Action(creds, "DescribeSubnets", {
+            "Filter.1.Name": "vpc-id", "Filter.1.Value.1": vpcId,
+          });
+          const subnetIds = (descSubRes.rawText.match(/<subnetId>([^<]+)<\/subnetId>/g) || [])
+            .map(m => m.replace(/<\/?subnetId>/g, ""));
+          privSubId = subnetIds[1] || subnetIds[0] || "";
+        }
 
         // Second subnet for RDS (needs 2 AZs)
         let dbSubnet2Id = "";
         if (databaseEngine && databaseEngine !== "none") {
           const dbSub2Res = await ec2Action(creds, "CreateSubnet", {
-            VpcId: vpcId, CidrBlock: "10.0.3.0/24", AvailabilityZone: az2,
+            VpcId: vpcId, CidrBlock: `10.0.${cidrOffset + 2}.0/24`, AvailabilityZone: az2,
           });
           dbSubnet2Id = extractTag(dbSub2Res.rawText, "subnetId") || "";
         }
