@@ -597,7 +597,7 @@ serve(async (req) => {
           // Create DB security group
           const dbSgRes = await ec2Action(creds, "CreateSecurityGroup", {
             GroupName: `cloudsnap-db-${safeName}-${Date.now()}`,
-            Description: `DB security group for ${safeName}`,
+            GroupDescription: `DB security group for ${safeName}`,
             VpcId: vpcId,
           });
           const dbSgId = extractTag(dbSgRes.rawText, "groupId");
