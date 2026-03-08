@@ -21,9 +21,12 @@ const backButtonRoutes = ["/projects", "/connections", "/deployments", "/monitor
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
+  const { isAdmin } = useAdmin();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+
+  const allNavItems = isAdmin ? [...navItems, { label: "Admin", icon: Shield, path: "/admin" }] : navItems;
 
   const handleSignOut = async () => {
     await signOut();
