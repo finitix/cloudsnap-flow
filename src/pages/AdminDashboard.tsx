@@ -4,6 +4,7 @@ import { useAdmin } from "@/hooks/useAdmin";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/AdminLayout";
 import { Shield, Users, FolderGit2, Rocket, Plug, Star, Mail, CheckCircle, AlertTriangle, Clock, TrendingUp } from "lucide-react";
+import AdminAnalyticsCharts from "@/components/admin/AdminAnalyticsCharts";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
