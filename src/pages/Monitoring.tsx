@@ -437,7 +437,7 @@ export default function Monitoring() {
                           {/* Recent Deploy History from Provider */}
                           {activeHealth.history.length > 0 && (
                             <div>
-                              <h4 className="text-sm font-semibold mb-3">Recent Deploy History (from Render)</h4>
+                              <h4 className="text-sm font-semibold mb-3">Recent Deploy History (from {activeDep?.provider === "vercel" ? "Vercel" : "Render"})</h4>
                               <div className="space-y-2">
                                 {activeHealth.history.map((h) => (
                                   <div key={h.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-4 py-2 text-xs">
