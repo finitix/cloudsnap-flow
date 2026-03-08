@@ -360,12 +360,13 @@ serve(async (req) => {
       if (infraErr) return json({ success: false, error: infraErr.message });
 
       // Create deployment record
-      await supabase.from("deployments").insert({
+      const { data: deployRec } = await supabase.from("deployments").insert({
         project_id: projectId,
         user_id: userId,
         provider: "aws",
         status: "building",
-      });
+      }).select().single();
+      const deploymentId = deployRec?.id;
 
       // ── Step 1: Create VPC ──
       try {
