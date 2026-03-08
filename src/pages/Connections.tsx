@@ -642,181 +642,146 @@ export default function Connections() {
           </Button>
         </div>
 
-        {/* ═══ Connected Accounts ═══ */}
-        {(connections.length > 0 || awsConnections.length > 0) && (
-          <div className="space-y-6">
-            {/* AWS Connections */}
-            {awsConnections.length > 0 && (
-              <div>
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <Cloud className="h-3.5 w-3.5" /> AWS Cloud
-                </h3>
-                <div className="space-y-3">
-                  {awsConnections.map((c) => (
-                    <div key={c.id} className="glass-card rounded-xl overflow-hidden">
-                      <div className="p-5 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400">
-                            <Cloud className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-sm">{c.display_name}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <Badge variant="outline" className="text-[10px]">{c.default_region}</Badge>
-                              <Badge variant="outline" className="text-[10px]">{c.connection_type === "assume_role" ? "Assume Role" : "IAM Keys"}</Badge>
-                              <span className="text-xs text-muted-foreground">Connected {new Date(c.created_at).toLocaleDateString()}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={() => checkFreeTier(c.id)}>
-                            <Activity className="h-3.5 w-3.5 mr-1.5" /> Free Tier Status
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteTarget({ id: c.id, name: c.display_name, type: "aws" })}>
-                            <Trash2 className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                        </div>
-                      </div>
-                      {freeTierInfo && (
-                        <div className="border-t border-border p-4">
-                          <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-3">Free Tier Usage</h4>
-                          <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-muted/30 rounded-lg p-3">
-                              <p className="text-xs text-muted-foreground">EC2 Instances</p>
-                              <p className="text-sm font-semibold">{freeTierInfo.ec2?.used || 0} / {freeTierInfo.ec2?.limit || 1}</p>
-                              {freeTierInfo.ec2?.withinLimit ? (
-                                <span className="text-[10px] text-green-400">Within limit</span>
-                              ) : (
-                                <span className="text-[10px] text-red-400">Exceeding limit</span>
-                              )}
-                            </div>
-                            <div className="bg-muted/30 rounded-lg p-3">
-                              <p className="text-xs text-muted-foreground">Est. Monthly Cost</p>
-                              <p className="text-sm font-semibold">${freeTierInfo.estimatedMonthlyCost?.toFixed(2) || "0.00"}</p>
-                            </div>
-                            {freeTierInfo.warning && (
-                              <div className="bg-amber-500/10 rounded-lg p-3">
-                                <div className="flex items-center gap-1">
-                                  <AlertTriangle className="h-3 w-3 text-amber-400" />
-                                  <p className="text-xs text-amber-400 font-medium">Warning</p>
-                                </div>
-                                <p className="text-[10px] text-amber-300 mt-1">{freeTierInfo.warning}</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+        {/* ═══ Detailed IAM Policy Guide ═══ */}
+        <div className="glass-card rounded-xl p-6 mb-8">
+          <h3 className="font-semibold text-sm mb-1 flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            IAM Policies — What to Select & Why
+          </h3>
+          <p className="text-xs text-muted-foreground mb-5">
+            IAM (Identity and Access Management) policies control what your Cloudsnap connection can do in AWS. Here's a detailed breakdown of each policy you need.
+          </p>
 
-            {/* Existing cloud connections (Vercel, Render) */}
-            {["Frontend", "Backend"].map((category) => {
-              const filtered = connections.filter((c) => getCategoryLabel(c.provider) === category);
-              if (filtered.length === 0) return null;
-              return (
-                <div key={category}>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-                    {category === "Frontend" ? <Globe className="h-3.5 w-3.5" /> : <Server className="h-3.5 w-3.5" />}
-                    {category} Deployment
-                  </h3>
-                  <div className="space-y-3">
-                    {filtered.map((c) => {
-                      const isExpanded = expandedId === c.id;
-                      const info = providerData[c.id];
-                      const bill = billingData[c.id];
-                      return (
-                        <div key={c.id} className="glass-card rounded-xl overflow-hidden">
-                          <div className="p-5 flex items-center justify-between cursor-pointer hover:bg-muted/10 transition-colors" onClick={() => toggleExpand(c.id)}>
-                            <div className="flex items-center gap-4">
-                              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                                {getProviderIcon(c.provider)}
-                              </div>
-                              <div>
-                                <p className="font-medium text-sm">{c.display_name || c.provider}</p>
-                                <p className="text-xs text-muted-foreground capitalize">{c.provider} • Connected {new Date(c.connected_at).toLocaleDateString()}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: c.id, name: c.display_name || c.provider, type: "cloud" }); }}>
-                                <Trash2 className="h-4 w-4 text-muted-foreground" />
-                              </Button>
-                              {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                            </div>
-                          </div>
-                          {isExpanded && (
-                            <div className="border-t border-border">
-                              <Tabs defaultValue="overview" className="p-4">
-                                <TabsList className="w-full justify-start">
-                                  <TabsTrigger value="overview"><User className="h-3.5 w-3.5 mr-1.5" />Overview</TabsTrigger>
-                                  <TabsTrigger value="projects"><FolderGit2 className="h-3.5 w-3.5 mr-1.5" />Projects</TabsTrigger>
-                                  <TabsTrigger value="billing"><CreditCard className="h-3.5 w-3.5 mr-1.5" />Billing</TabsTrigger>
-                                </TabsList>
-                                <TabsContent value="overview" className="mt-4">
-                                  {loadingInfo === c.id ? (
-                                    <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
-                                      <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-                                    </div>
-                                  ) : info ? (
-                                    <div className="space-y-4">
-                                      {info.user && (
-                                        <div className="bg-muted/50 rounded-lg p-4">
-                                          <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-3">Account</h4>
-                                          <div className="grid grid-cols-3 gap-4">
-                                            {info.user.name && <div><p className="text-xs text-muted-foreground">Name</p><p className="text-sm font-medium">{info.user.name}</p></div>}
-                                            {info.user.username && <div><p className="text-xs text-muted-foreground">Username</p><p className="text-sm font-mono">{info.user.username}</p></div>}
-                                            {info.user.email && <div><p className="text-xs text-muted-foreground">Email</p><p className="text-sm">{info.user.email}</p></div>}
-                                          </div>
-                                        </div>
-                                      )}
-                                      <Button variant="outline" size="sm" onClick={() => fetchProviderInfo(c.id)}>
-                                        <RefreshCw className="h-3 w-3 mr-1.5" /> Refresh
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <div className="text-center py-8 text-muted-foreground text-sm">
-                                      <Activity className="h-8 w-8 mx-auto mb-3 opacity-30" />
-                                      <p>Loading provider information...</p>
-                                    </div>
-                                  )}
-                                </TabsContent>
-                                <TabsContent value="projects" className="mt-4">
-                                  {info?.projects?.length > 0 ? (
-                                    <div className="space-y-2">
-                                      {info.projects.slice(0, 10).map((p: any, i: number) => (
-                                        <div key={i} className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
-                                          <p className="text-sm font-medium">{p.name}</p>
-                                          <Badge variant="outline" className="text-[10px]">{p.framework || "Unknown"}</Badge>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <p className="text-center py-8 text-muted-foreground text-sm">No projects on this provider</p>
-                                  )}
-                                </TabsContent>
-                                <TabsContent value="billing" className="mt-4">
-                                  {bill ? (
-                                    <div className="bg-muted/50 rounded-lg p-4">
-                                      <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(bill, null, 2)}</pre>
-                                    </div>
-                                  ) : (
-                                    <p className="text-center py-8 text-muted-foreground text-sm">Loading billing info...</p>
-                                  )}
-                                </TabsContent>
-                              </Tabs>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+          {/* Policy Overview */}
+          <div className="bg-muted/30 rounded-lg p-4 mb-5 border border-border">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p className="font-semibold text-foreground">Security Best Practice</p>
+                <p>Never use your AWS root account. Always create a dedicated IAM user with only the permissions Cloudsnap needs. This follows the <strong>Principle of Least Privilege</strong>.</p>
+              </div>
+            </div>
           </div>
-        )}
+
+          {/* Required Policies */}
+          <div className="space-y-4 mb-6">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-2">
+              <CheckCircle className="h-3.5 w-3.5" /> Required Policies
+            </h4>
+
+            <div className="bg-muted/20 rounded-lg p-4 border border-border space-y-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className="bg-primary/10 text-primary text-[10px] border-primary/20">Required</Badge>
+                  <p className="text-sm font-semibold">AmazonEC2FullAccess</p>
+                </div>
+                <p className="text-xs text-muted-foreground ml-0.5">Allows Cloudsnap to create, start, stop, and terminate EC2 instances (virtual servers). Also covers Security Groups (firewall rules), Key Pairs, and Elastic IPs. This is the core policy for deploying your applications on virtual machines.</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono ml-0.5">ARN: arn:aws:iam::aws:policy/AmazonEC2FullAccess</p>
+              </div>
+            </div>
+
+            <div className="bg-muted/20 rounded-lg p-4 border border-border space-y-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className="bg-primary/10 text-primary text-[10px] border-primary/20">Required</Badge>
+                  <p className="text-sm font-semibold">AmazonVPCFullAccess</p>
+                </div>
+                <p className="text-xs text-muted-foreground ml-0.5">Allows creation and management of Virtual Private Clouds (VPCs), subnets, route tables, internet gateways, and NAT gateways. VPCs isolate your infrastructure in a private network — every deployment needs one.</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono ml-0.5">ARN: arn:aws:iam::aws:policy/AmazonVPCFullAccess</p>
+              </div>
+            </div>
+
+            <div className="bg-muted/20 rounded-lg p-4 border border-border space-y-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className="bg-primary/10 text-primary text-[10px] border-primary/20">Required</Badge>
+                  <p className="text-sm font-semibold">AmazonRDSFullAccess</p>
+                </div>
+                <p className="text-xs text-muted-foreground ml-0.5">Allows Cloudsnap to provision and manage RDS databases (MySQL, PostgreSQL). Includes creating DB instances, managing backups, and configuring DB subnet groups. Required if your project uses a database.</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono ml-0.5">ARN: arn:aws:iam::aws:policy/AmazonRDSFullAccess</p>
+              </div>
+            </div>
+
+            <div className="bg-muted/20 rounded-lg p-4 border border-border space-y-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className="bg-primary/10 text-primary text-[10px] border-primary/20">Required</Badge>
+                  <p className="text-sm font-semibold">AmazonS3FullAccess</p>
+                </div>
+                <p className="text-xs text-muted-foreground ml-0.5">Allows management of S3 buckets for file storage, static assets, build artifacts, and deployment packages. Used to store your project files during the deployment process.</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono ml-0.5">ARN: arn:aws:iam::aws:policy/AmazonS3FullAccess</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Recommended Policies */}
+          <div className="space-y-4 mb-6">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+              <Activity className="h-3.5 w-3.5" /> Recommended Policies
+            </h4>
+
+            <div className="bg-muted/20 rounded-lg p-4 border border-border/50 space-y-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className="bg-amber-500/10 text-amber-400 text-[10px] border-amber-500/20">Recommended</Badge>
+                  <p className="text-sm font-semibold">CloudWatchFullAccess</p>
+                </div>
+                <p className="text-xs text-muted-foreground ml-0.5">Enables real-time monitoring of your infrastructure — CPU usage, memory, network traffic, and application logs. Powers the Monitoring dashboard in Cloudsnap. Without this, you won't see live metrics.</p>
+              </div>
+            </div>
+
+            <div className="bg-muted/20 rounded-lg p-4 border border-border/50 space-y-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge className="bg-amber-500/10 text-amber-400 text-[10px] border-amber-500/20">Recommended</Badge>
+                  <p className="text-sm font-semibold">IAMReadOnlyAccess</p>
+                </div>
+                <p className="text-xs text-muted-foreground ml-0.5">Allows Cloudsnap to verify your IAM configuration and validate credentials. Read-only — cannot create or modify IAM users/roles. Used during the "Validate Credentials" step.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick-Start vs Custom */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+            <div className="bg-green-500/5 rounded-lg p-4 border border-green-500/20">
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <Zap className="h-4 w-4 text-green-400" /> Quick Start (Students)
+              </h4>
+              <p className="text-xs text-muted-foreground mb-3">If you're learning or experimenting, attach the <strong>AdministratorAccess</strong> managed policy. This grants full access to all AWS services — simple but not recommended for production.</p>
+              <div className="bg-muted/30 rounded p-2 font-mono text-[10px] text-muted-foreground">
+                Policy: AdministratorAccess<br />
+                ARN: arn:aws:iam::aws:policy/AdministratorAccess
+              </div>
+            </div>
+            <div className="bg-primary/5 rounded-lg p-4 border border-primary/20">
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <Shield className="h-4 w-4 text-primary" /> Production (Best Practice)
+              </h4>
+              <p className="text-xs text-muted-foreground mb-3">For real projects, attach only the 4 required + 2 recommended policies listed above. This limits what Cloudsnap can access, protecting your other AWS resources.</p>
+              <div className="bg-muted/30 rounded p-2 font-mono text-[10px] text-muted-foreground">
+                Attach: EC2, VPC, RDS, S3<br />
+                + CloudWatch, IAMReadOnly
+              </div>
+            </div>
+          </div>
+
+          {/* How to Attach Policies */}
+          <div className="bg-muted/30 rounded-lg p-4 border border-border">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground mb-3 flex items-center gap-2">
+              <Key className="h-3.5 w-3.5 text-primary" /> How to Attach Policies in AWS Console
+            </h4>
+            <ol className="text-xs text-muted-foreground space-y-2 list-decimal list-inside">
+              <li>Go to <a href="https://console.aws.amazon.com/iam/home#/users" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">IAM → Users</a> and select your IAM user</li>
+              <li>Click the <strong>"Permissions"</strong> tab, then <strong>"Add permissions"</strong></li>
+              <li>Choose <strong>"Attach policies directly"</strong></li>
+              <li>Search for each policy name (e.g., "AmazonEC2FullAccess") and check the box</li>
+              <li>Click <strong>"Next"</strong> → <strong>"Add permissions"</strong></li>
+              <li>Go to <strong>"Security credentials"</strong> tab → <strong>"Create access key"</strong></li>
+              <li>Select <strong>"Application running outside AWS"</strong> and create the key</li>
+              <li>Copy both keys and paste them in the Connect AWS form above</li>
+            </ol>
+          </div>
+        </div>
 
         {connections.length === 0 && awsConnections.length === 0 && (
           <div className="glass-card rounded-xl p-12 text-center">
