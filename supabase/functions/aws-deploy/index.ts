@@ -534,41 +534,37 @@ serve(async (req) => {
           throw new Error("Failed to launch EC2 instance: " + (instanceRes.rawText.substring(0, 200)));
         }
 
-        if (instanceId) {
-          // Save EC2 resource
-          await supabase.from("aws_resources").insert({
-            infrastructure_id: infra.id,
-            user_id: userId,
-            resource_type: "ec2",
-            resource_id: instanceId,
-            status: "running",
-            config: { instanceType: FREE_TIER.ec2InstanceType, amiId, port },
-            monthly_cost_estimate: COST_ESTIMATES.ec2_t2_micro,
-          });
+        // Save EC2 resource
+        await supabase.from("aws_resources").insert({
+          infrastructure_id: infra.id,
+          user_id: userId,
+          resource_type: "ec2",
+          resource_id: instanceId,
+          status: "running",
+          config: { instanceType: FREE_TIER.ec2InstanceType, amiId, port },
+          monthly_cost_estimate: COST_ESTIMATES.ec2_t2_micro,
+        });
 
-          // Wait longer for public IP assignment, then retry
-          let publicIp = "";
-          let publicDns = "";
-          for (let attempt = 0; attempt < 5; attempt++) {
-            await new Promise(r => setTimeout(r, 5000));
-            const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
-            publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress") || "";
-            publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName") || "";
-            if (publicIp || publicDns) break;
+        // Wait for public IP assignment with retries
+        let publicIp = "";
+        let publicDns = "";
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await new Promise(r => setTimeout(r, 5000));
+          const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
+          publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress") || "";
+          publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName") || "";
+          if (publicIp || publicDns) break;
+        }
+
+        if (publicIp || publicDns) {
+          const liveUrl = `http://${publicDns || publicIp}`;
+          await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: liveUrl }).eq("infrastructure_id", infra.id).eq("resource_type", "ec2");
+
+          if (deploymentId) {
+            await supabase.from("deployments").update({ status: "live", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
           }
-
-          if (publicIp || publicDns) {
-            const liveUrl = `http://${publicDns || publicIp}`;
-            await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: liveUrl }).eq("infrastructure_id", infra.id).eq("resource_type", "ec2");
-
-            // Update deployment with live URL using the deployment ID
-            if (deploymentId) {
-              await supabase.from("deployments").update({ status: "live", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
-            }
-          } else if (deploymentId) {
-            // Still mark as live but note no public IP yet
-            await supabase.from("deployments").update({ status: "live", deploy_id: instanceId, error_message: "Public IP not yet assigned — check AWS console" }).eq("id", deploymentId);
-          }
+        } else if (deploymentId) {
+          await supabase.from("deployments").update({ status: "live", deploy_id: instanceId, error_message: "Public IP not yet assigned — check back in a few minutes" }).eq("id", deploymentId);
         }
 
         await supabase.from("aws_infrastructure").update({ status: "creating_resources" }).eq("id", infra.id);
