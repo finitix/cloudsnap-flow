@@ -517,13 +517,13 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
 
   // Render build_failed
   if (msg.includes("render deploy failed") || msg.includes("render_build_failed") || (msg.includes("render") && msg.includes("build_failed"))) {
-    // Try to extract useful info from build logs
-    const logMatch = errorMessage.match(/Logs:\s*(.+)/s);
-    const logSnippet = logMatch?.[1]?.slice(0, 300) || "";
+    // Parse actual build logs if included
+    const logMatch = errorMessage.match(/=== RENDER BUILD LOGS ===\n([\s\S]+)$/);
+    const logSnippet = logMatch?.[1] || errorMessage.match(/Logs:\s*(.+)/s)?.[1]?.slice(0, 2000) || "";
     let subCategory = "general_render_build";
     let fix = "Re-analyze project, fix build/start commands";
 
-    if (logSnippet.includes("command not found") || logSnippet.includes("not found")) {
+    if (logSnippet.includes("command not found") || logSnippet.includes("not found:")) {
       subCategory = "render_command_not_found";
       fix = "Fix startCommand — binary or script not found";
     } else if (logSnippet.includes("ModuleNotFoundError") || logSnippet.includes("No module named")) {
@@ -532,13 +532,31 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
     } else if (logSnippet.includes("npm ERR") || logSnippet.includes("ERESOLVE")) {
       subCategory = "render_npm_error";
       fix = "Use --legacy-peer-deps for npm install";
+    } else if (logSnippet.includes("Cannot find module") || logSnippet.includes("MODULE_NOT_FOUND")) {
+      subCategory = "render_missing_node_module";
+      fix = "Fix entry point or install missing dependency";
+    } else if (logSnippet.includes("ENOENT") || logSnippet.includes("no such file")) {
+      subCategory = "render_missing_file";
+      fix = "Fix rootDirectory or file paths";
+    } else if (logSnippet.includes("permission denied") || logSnippet.includes("EACCES")) {
+      subCategory = "render_permission";
+      fix = "Fix file permissions";
+    } else if (logSnippet.includes("SyntaxError") || logSnippet.includes("syntax error")) {
+      subCategory = "render_syntax_error";
+      fix = "Source code has syntax errors — check code";
+    } else if (logSnippet.includes("node:") && logSnippet.includes("ERR_")) {
+      subCategory = "render_node_error";
+      fix = "Node.js runtime error during build";
+    } else if (logSnippet.includes("npm warn") && logSnippet.includes("deprecated")) {
+      subCategory = "render_deprecated_deps";
+      fix = "Update deprecated dependencies";
     }
 
     return {
       category: "render_build_error",
       description: `Render build failed (${subCategory})`,
       suggestedFix: fix,
-      extractedDetails: { subCategory, logSnippet },
+      extractedDetails: { subCategory, logSnippet: logSnippet.slice(-500) },
     };
   }
 
