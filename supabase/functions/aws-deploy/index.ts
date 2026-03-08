@@ -360,12 +360,13 @@ serve(async (req) => {
       if (infraErr) return json({ success: false, error: infraErr.message });
 
       // Create deployment record
-      await supabase.from("deployments").insert({
+      const { data: deployRec } = await supabase.from("deployments").insert({
         project_id: projectId,
         user_id: userId,
         provider: "aws",
         status: "building",
-      });
+      }).select().single();
+      const deploymentId = deployRec?.id;
 
       // ── Step 1: Create VPC ──
       try {
@@ -537,18 +538,28 @@ serve(async (req) => {
             monthly_cost_estimate: COST_ESTIMATES.ec2_t2_micro,
           });
 
-          // Wait a moment then get public IP
-          await new Promise(r => setTimeout(r, 3000));
-          const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
-          const publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress");
-          const publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName");
+          // Wait longer for public IP assignment, then retry
+          let publicIp = "";
+          let publicDns = "";
+          for (let attempt = 0; attempt < 5; attempt++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
+            publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress") || "";
+            publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName") || "";
+            if (publicIp || publicDns) break;
+          }
 
           if (publicIp || publicDns) {
             const liveUrl = `http://${publicDns || publicIp}`;
             await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: liveUrl }).eq("infrastructure_id", infra.id).eq("resource_type", "ec2");
 
-            // Update deployment
-            await supabase.from("deployments").update({ status: "live", live_url: liveUrl }).eq("project_id", projectId).eq("provider", "aws").order("created_at", { ascending: false }).limit(1);
+            // Update deployment with live URL using the deployment ID
+            if (deploymentId) {
+              await supabase.from("deployments").update({ status: "live", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
+            }
+          } else if (deploymentId) {
+            // Still mark as live but note no public IP yet
+            await supabase.from("deployments").update({ status: "live", deploy_id: instanceId, error_message: "Public IP not yet assigned — check AWS console" }).eq("id", deploymentId);
           }
         }
 
