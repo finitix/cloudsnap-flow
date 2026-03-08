@@ -462,6 +462,101 @@ export type Database = {
         }
         Relationships: []
       }
+      github_accounts: {
+        Row: {
+          access_token: string
+          avatar_url: string | null
+          connected_at: string
+          email: string | null
+          github_id: number
+          id: string
+          updated_at: string
+          user_id: string
+          username: string
+        }
+        Insert: {
+          access_token: string
+          avatar_url?: string | null
+          connected_at?: string
+          email?: string | null
+          github_id: number
+          id?: string
+          updated_at?: string
+          user_id: string
+          username: string
+        }
+        Update: {
+          access_token?: string
+          avatar_url?: string | null
+          connected_at?: string
+          email?: string | null
+          github_id?: number
+          id?: string
+          updated_at?: string
+          user_id?: string
+          username?: string
+        }
+        Relationships: []
+      }
+      github_repositories: {
+        Row: {
+          clone_url: string | null
+          default_branch: string
+          description: string | null
+          full_name: string
+          github_account_id: string
+          html_url: string | null
+          id: string
+          is_private: boolean
+          language: string | null
+          name: string
+          repo_id: number
+          synced_at: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          clone_url?: string | null
+          default_branch?: string
+          description?: string | null
+          full_name: string
+          github_account_id: string
+          html_url?: string | null
+          id?: string
+          is_private?: boolean
+          language?: string | null
+          name: string
+          repo_id: number
+          synced_at?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          clone_url?: string | null
+          default_branch?: string
+          description?: string | null
+          full_name?: string
+          github_account_id?: string
+          html_url?: string | null
+          id?: string
+          is_private?: boolean
+          language?: string | null
+          name?: string
+          repo_id?: number
+          synced_at?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "github_repositories_github_account_id_fkey"
+            columns: ["github_account_id"]
+            isOneToOne: false
+            referencedRelation: "github_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
