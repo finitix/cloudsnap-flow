@@ -1291,14 +1291,15 @@ async function runAutoHeal(
     }
   }
 
-  // ── Analyze error: use AI with timeout, fallback to smart rule-based ──
+  // ── Analyze error: use AI with 30s timeout, fallback to smart rule-based ──
   let analysis: ErrorAnalysis;
-  await appendLog(`🤖 [AUTO-HEAL] Attempt ${currentRetry}/${MAX_RETRIES} — analyzing error...`);
+  await appendLog(`🤖 [AUTO-HEAL] Attempt ${currentRetry}/${MAX_RETRIES} — analyzing error with AI...`);
 
-  // Try AI with short timeout (10s), but always fall back quickly
+  // Pass full context including build logs to AI
   analysis = await analyzeErrorWithAI(enrichedError, {
     ...project,
     provider: connection.provider,
+    backendRootDir: project.backend_build_command?.match(/cd\s+(\S+)/)?.[1] || "",
     backendRuntime: project.backend_framework?.includes("Python") ? "python" :
                    project.backend_framework?.includes("Go") ? "go" :
                    project.backend_framework?.includes("Ruby") ? "ruby" : "node",
