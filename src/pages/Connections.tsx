@@ -293,7 +293,175 @@ export default function Connections() {
           </Dialog>
         </div>
 
-        {/* ═══ Cloud Provider Cards ═══ */}
+        {/* ═══ Connected Accounts (shown first) ═══ */}
+        {(connections.length > 0 || awsConnections.length > 0) && (
+          <div className="mb-8 space-y-6">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-green-400">Connected Accounts</h2>
+            </div>
+
+            {/* AWS Connections */}
+            {awsConnections.map((c) => (
+              <div key={c.id} className="glass-card rounded-xl overflow-hidden border border-green-500/20">
+                <div className="p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400">
+                      <Cloud className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm">{c.display_name}</p>
+                        <Badge className="bg-green-500/15 text-green-400 text-[10px]"><CheckCircle className="h-3 w-3 mr-1" /> Active</Badge>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="outline" className="text-[10px]">{c.default_region}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{c.connection_type === "assume_role" ? "Assume Role" : "IAM Keys"}</Badge>
+                        <span className="text-xs text-muted-foreground">Connected {new Date(c.created_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => checkFreeTier(c.id)}>
+                      <Activity className="h-3.5 w-3.5 mr-1.5" /> Free Tier Status
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => setDeleteTarget({ id: c.id, name: c.display_name, type: "aws" })}>
+                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </div>
+                </div>
+                {freeTierInfo && (
+                  <div className="border-t border-border p-4">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-3">Free Tier Usage</h4>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-muted/30 rounded-lg p-3">
+                        <p className="text-xs text-muted-foreground">EC2 Instances</p>
+                        <p className="text-sm font-semibold">{freeTierInfo.ec2?.used || 0} / {freeTierInfo.ec2?.limit || 1}</p>
+                        {freeTierInfo.ec2?.withinLimit ? (
+                          <span className="text-[10px] text-green-400">Within limit</span>
+                        ) : (
+                          <span className="text-[10px] text-red-400">Exceeding limit</span>
+                        )}
+                      </div>
+                      <div className="bg-muted/30 rounded-lg p-3">
+                        <p className="text-xs text-muted-foreground">Est. Monthly Cost</p>
+                        <p className="text-sm font-semibold">${freeTierInfo.estimatedMonthlyCost?.toFixed(2) || "0.00"}</p>
+                      </div>
+                      {freeTierInfo.warning && (
+                        <div className="bg-amber-500/10 rounded-lg p-3">
+                          <div className="flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3 text-amber-400" />
+                            <p className="text-xs text-amber-400 font-medium">Warning</p>
+                          </div>
+                          <p className="text-[10px] text-amber-300 mt-1">{freeTierInfo.warning}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Vercel / Render Connections */}
+            {connections.map((c) => {
+              const isExpanded = expandedId === c.id;
+              const info = providerData[c.id];
+              const bill = billingData[c.id];
+              return (
+                <div key={c.id} className="glass-card rounded-xl overflow-hidden border border-green-500/20">
+                  <div className="p-5 flex items-center justify-between cursor-pointer hover:bg-muted/10 transition-colors" onClick={() => toggleExpand(c.id)}>
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                        {getProviderIcon(c.provider)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{c.display_name || c.provider}</p>
+                          <Badge className="bg-green-500/15 text-green-400 text-[10px]"><CheckCircle className="h-3 w-3 mr-1" /> Active</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground capitalize">{c.provider} • {getCategoryLabel(c.provider)} • Connected {new Date(c.connected_at).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: c.id, name: c.display_name || c.provider, type: "cloud" }); }}>
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                      {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="border-t border-border">
+                      <Tabs defaultValue="overview" className="p-4">
+                        <TabsList className="w-full justify-start">
+                          <TabsTrigger value="overview"><User className="h-3.5 w-3.5 mr-1.5" />Overview</TabsTrigger>
+                          <TabsTrigger value="projects"><FolderGit2 className="h-3.5 w-3.5 mr-1.5" />Projects</TabsTrigger>
+                          <TabsTrigger value="billing"><CreditCard className="h-3.5 w-3.5 mr-1.5" />Billing</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="overview" className="mt-4">
+                          {loadingInfo === c.id ? (
+                            <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
+                              <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+                            </div>
+                          ) : info ? (
+                            <div className="space-y-4">
+                              {info.user && (
+                                <div className="bg-muted/50 rounded-lg p-4">
+                                  <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-3">Account</h4>
+                                  <div className="grid grid-cols-3 gap-4">
+                                    {info.user.name && <div><p className="text-xs text-muted-foreground">Name</p><p className="text-sm font-medium">{info.user.name}</p></div>}
+                                    {info.user.username && <div><p className="text-xs text-muted-foreground">Username</p><p className="text-sm font-mono">{info.user.username}</p></div>}
+                                    {info.user.email && <div><p className="text-xs text-muted-foreground">Email</p><p className="text-sm">{info.user.email}</p></div>}
+                                  </div>
+                                </div>
+                              )}
+                              <Button variant="outline" size="sm" onClick={() => fetchProviderInfo(c.id)}>
+                                <RefreshCw className="h-3 w-3 mr-1.5" /> Refresh
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="text-center py-8 text-muted-foreground text-sm">
+                              <Activity className="h-8 w-8 mx-auto mb-3 opacity-30" />
+                              <p>Loading provider information...</p>
+                            </div>
+                          )}
+                        </TabsContent>
+                        <TabsContent value="projects" className="mt-4">
+                          {info?.projects?.length > 0 ? (
+                            <div className="space-y-2">
+                              {info.projects.slice(0, 10).map((p: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+                                  <p className="text-sm font-medium">{p.name}</p>
+                                  <Badge variant="outline" className="text-[10px]">{p.framework || "Unknown"}</Badge>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-center py-8 text-muted-foreground text-sm">No projects on this provider</p>
+                          )}
+                        </TabsContent>
+                        <TabsContent value="billing" className="mt-4">
+                          {bill ? (
+                            <div className="bg-muted/50 rounded-lg p-4">
+                              <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(bill, null, 2)}</pre>
+                            </div>
+                          ) : (
+                            <p className="text-center py-8 text-muted-foreground text-sm">Loading billing info...</p>
+                          )}
+                        </TabsContent>
+                      </Tabs>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ═══ Add New Connection — Cloud Provider Cards ═══ */}
+        <div className="mb-2 flex items-center gap-2">
+          <Plus className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Add New Connection</h2>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           {/* AWS — Live */}
           <div
@@ -314,12 +482,7 @@ export default function Connections() {
             </p>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="flex items-center gap-1"><Server className="h-3 w-3" /> EC2</span>
-              <span>•</span>
-              <span>RDS</span>
-              <span>•</span>
-              <span>VPC</span>
-              <span>•</span>
-              <span>S3</span>
+              <span>•</span><span>RDS</span><span>•</span><span>VPC</span><span>•</span><span>S3</span>
             </div>
             {awsConnections.length > 0 && (
               <div className="mt-3 pt-3 border-t border-border">
