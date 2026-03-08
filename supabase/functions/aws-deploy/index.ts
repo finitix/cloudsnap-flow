@@ -165,7 +165,7 @@ const FREE_TIER = {
   rdsInstanceClass: "db.t3.micro",
   rdsStorage: 20,
   ebsSize: 10,
-  maxEnvironments: 1,
+  
   idleTimeoutMinutes: 30,
 };
 
