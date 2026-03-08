@@ -6,11 +6,32 @@ import StatusBadge from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Upload, Github, FolderGit2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Upload, Github, FolderGit2, Cloud, Server, Globe, Database, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+
+const APP_TYPES = [
+  { id: "frontend", name: "Frontend", icon: Globe, description: "React, Vue, Angular, Static sites" },
+  { id: "backend", name: "Backend", icon: Server, description: "Node.js, Python, Java APIs" },
+  { id: "fullstack", name: "Full Stack", icon: FolderGit2, description: "Frontend + Backend" },
+];
+
+const DB_OPTIONS = [
+  { id: "none", name: "No Database" },
+  { id: "postgresql", name: "PostgreSQL" },
+  { id: "mysql", name: "MySQL" },
+];
+
+const AWS_REGIONS = [
+  { id: "us-east-1", name: "US East (N. Virginia)" },
+  { id: "us-west-2", name: "US West (Oregon)" },
+  { id: "ap-south-1", name: "Asia Pacific (Mumbai)" },
+  { id: "eu-west-1", name: "EU (Ireland)" },
+];
 
 export default function Projects() {
   const { user } = useAuth();
@@ -20,12 +41,23 @@ export default function Projects() {
   const [githubUrl, setGithubUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [appType, setAppType] = useState("frontend");
+  const [databaseEngine, setDatabaseEngine] = useState("none");
+  const [awsRegion, setAwsRegion] = useState("us-east-1");
+  const [awsConnections, setAwsConnections] = useState<any[]>([]);
+  const [selectedAwsConn, setSelectedAwsConn] = useState("");
+  const [deployTarget, setDeployTarget] = useState<"cloud" | "aws">("cloud");
   const navigate = useNavigate();
 
   const load = async () => {
     if (!user) return;
-    const { data } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
-    setProjects(data || []);
+    const [projectsRes, awsRes] = await Promise.all([
+      supabase.from("projects").select("*").order("created_at", { ascending: false }),
+      supabase.from("aws_connections").select("id, display_name, default_region"),
+    ]);
+    setProjects(projectsRes.data || []);
+    setAwsConnections(awsRes.data || []);
+    if (awsRes.data && awsRes.data.length > 0) setSelectedAwsConn(awsRes.data[0].id);
   };
 
   useEffect(() => { load(); }, [user]);
@@ -40,22 +72,28 @@ export default function Projects() {
         if (uploadErr) throw uploadErr;
       }
 
-      const { data, error } = await supabase.from("projects").insert({
+      const insertData: any = {
         user_id: user!.id,
         name,
         source_type: sourceType,
         github_url: sourceType === "github" ? githubUrl : null,
+        project_type: appType,
         status: "analyzing",
-      }).select().single();
+      };
 
+      if (deployTarget === "aws") {
+        insertData.aws_region = awsRegion;
+        insertData.database_engine = databaseEngine;
+        insertData.aws_connection_id = selectedAwsConn;
+      }
+
+      const { data, error } = await supabase.from("projects").insert(insertData).select().single();
       if (error) throw error;
       toast.success("Project created! Analyzing...");
       setOpen(false);
-      setName("");
-      setGithubUrl("");
-      setFile(null);
+      setName(""); setGithubUrl(""); setFile(null); setAppType("frontend"); setDatabaseEngine("none");
 
-      // Trigger real analysis via edge function
+      // Trigger analysis
       const { data: analysisData } = await supabase.functions.invoke("deploy-project", {
         body: { action: "analyze", projectId: data.id },
       });
@@ -64,11 +102,9 @@ export default function Projects() {
         load();
         toast.success(`Project "${name}" analysis complete — ${analysisData.projectType || "ready"}!`);
       } else {
-        // Fallback simulated analysis
         setTimeout(async () => {
           await supabase.from("projects").update({
-            framework: "React",
-            project_type: "frontend",
+            framework: appType === "frontend" ? "React" : "Node.js",
             build_command: "npm run build",
             output_dir: "dist",
             status: "ready",
@@ -98,7 +134,7 @@ export default function Projects() {
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" />Add Project</Button>
             </DialogTrigger>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-lg">
               <DialogHeader>
                 <DialogTitle>Add Project</DialogTitle>
               </DialogHeader>
@@ -107,6 +143,102 @@ export default function Projects() {
                   <Label>Project Name</Label>
                   <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-awesome-app" />
                 </div>
+
+                {/* Deploy Target */}
+                <div className="space-y-2">
+                  <Label>Deploy Target</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setDeployTarget("cloud")}
+                      className={`p-3 rounded-lg border text-left transition-all text-sm ${deployTarget === "cloud" ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}
+                    >
+                      <div className="flex items-center gap-2 font-medium"><Cloud className="h-4 w-4" /> Cloud PaaS</div>
+                      <p className="text-[10px] text-muted-foreground mt-1">Vercel, Render</p>
+                    </button>
+                    <button
+                      onClick={() => setDeployTarget("aws")}
+                      className={`p-3 rounded-lg border text-left transition-all text-sm ${deployTarget === "aws" ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}
+                      disabled={awsConnections.length === 0}
+                    >
+                      <div className="flex items-center gap-2 font-medium"><Cloud className="h-4 w-4" /> AWS</div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {awsConnections.length === 0 ? "Connect AWS first" : "EC2, RDS, VPC"}
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Application Type */}
+                <div className="space-y-2">
+                  <Label>Application Type</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {APP_TYPES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setAppType(t.id)}
+                        className={`p-3 rounded-lg border text-center transition-all ${appType === t.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}
+                      >
+                        <t.icon className={`h-5 w-5 mx-auto mb-1 ${appType === t.id ? "text-primary" : "text-muted-foreground"}`} />
+                        <p className="text-xs font-medium">{t.name}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* AWS-specific options */}
+                {deployTarget === "aws" && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label className="flex items-center gap-1"><MapPin className="h-3 w-3" /> AWS Region</Label>
+                        <Select value={awsRegion} onValueChange={setAwsRegion}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {AWS_REGIONS.map(r => (
+                              <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="flex items-center gap-1"><Database className="h-3 w-3" /> Database</Label>
+                        <Select value={databaseEngine} onValueChange={setDatabaseEngine}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {DB_OPTIONS.map(d => (
+                              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {awsConnections.length > 1 && (
+                      <div className="space-y-2">
+                        <Label>AWS Account</Label>
+                        <Select value={selectedAwsConn} onValueChange={setSelectedAwsConn}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {awsConnections.map(c => (
+                              <SelectItem key={c.id} value={c.id}>{c.display_name} ({c.default_region})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {databaseEngine !== "none" && (
+                      <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
+                        <p className="font-medium text-foreground mb-1">Free Tier Config:</p>
+                        <p>• EC2: t2.micro (750 hrs/month free)</p>
+                        <p>• RDS: db.t3.micro, 20GB ({databaseEngine})</p>
+                        <p>• Estimated cost: <span className="text-green-400 font-medium">$0.00/month</span> (within free tier)</p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Source */}
                 <Tabs defaultValue="github">
                   <TabsList className="w-full">
                     <TabsTrigger value="github" className="flex-1"><Github className="h-4 w-4 mr-2" />GitHub</TabsTrigger>
@@ -153,13 +285,19 @@ export default function Projects() {
               >
                 <div className="flex items-center gap-4">
                   <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    {p.source_type === "github" ? <Github className="h-5 w-5 text-primary" /> : <Upload className="h-5 w-5 text-primary" />}
+                    {p.aws_connection_id ? <Cloud className="h-5 w-5 text-amber-400" /> :
+                     p.source_type === "github" ? <Github className="h-5 w-5 text-primary" /> : <Upload className="h-5 w-5 text-primary" />}
                   </div>
                   <div>
                     <p className="font-medium">{p.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {p.framework || "Detecting..."} • {p.source_type}
-                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-muted-foreground">{p.framework || "Detecting..."} • {p.source_type}</span>
+                      {p.aws_connection_id && <Badge variant="outline" className="text-[10px]">AWS</Badge>}
+                      {p.aws_region && <Badge variant="outline" className="text-[10px]">{p.aws_region}</Badge>}
+                      {p.database_engine && p.database_engine !== "none" && (
+                        <Badge variant="outline" className="text-[10px]">{p.database_engine}</Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
