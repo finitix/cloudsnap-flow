@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { useAdmin } from "@/hooks/useAdmin";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -36,9 +37,21 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Routes only for regular (non-admin) users. Admins get redirected to /admin. */
+function UserRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const { isAdmin, loading: adminLoading } = useAdmin();
+  if (loading || adminLoading) return <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Loading...</div>;
+  if (!user) return <Navigate to="/auth" replace />;
+  if (isAdmin) return <Navigate to="/admin" replace />;
+  return <>{children}</>;
+}
+
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  const { isAdmin, loading: adminLoading } = useAdmin();
+  if (loading || adminLoading) return null;
+  if (user && isAdmin) return <Navigate to="/admin" replace />;
   if (user) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
@@ -53,13 +66,13 @@ const AppRoutes = () => (
     <Route path="/support" element={<ContactSupport />} />
     <Route path="/terms" element={<Terms />} />
     <Route path="/privacy" element={<Privacy />} />
-    <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-    <Route path="/projects" element={<ProtectedRoute><Projects /></ProtectedRoute>} />
-    <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
-    <Route path="/connections" element={<ProtectedRoute><Connections /></ProtectedRoute>} />
-    <Route path="/deployments" element={<ProtectedRoute><Deployments /></ProtectedRoute>} />
-    <Route path="/monitoring" element={<ProtectedRoute><Monitoring /></ProtectedRoute>} />
-    <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+    <Route path="/dashboard" element={<UserRoute><Dashboard /></UserRoute>} />
+    <Route path="/projects" element={<UserRoute><Projects /></UserRoute>} />
+    <Route path="/projects/:id" element={<UserRoute><ProjectDetail /></UserRoute>} />
+    <Route path="/connections" element={<UserRoute><Connections /></UserRoute>} />
+    <Route path="/deployments" element={<UserRoute><Deployments /></UserRoute>} />
+    <Route path="/monitoring" element={<UserRoute><Monitoring /></UserRoute>} />
+    <Route path="/settings" element={<UserRoute><Settings /></UserRoute>} />
     <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
     <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
     <Route path="/admin/projects" element={<ProtectedRoute><AdminProjects /></ProtectedRoute>} />
