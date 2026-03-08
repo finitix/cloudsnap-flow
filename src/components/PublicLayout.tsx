@@ -7,8 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 const navLinks = [
   { label: "About", path: "/about" },
   { label: "Reviews", path: "/reviews" },
-  { label: "Contact", path: "/contact" },
-  { label: "Support", path: "/support" },
+  { label: "Contact & Support", path: "/contact" },
 ];
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
