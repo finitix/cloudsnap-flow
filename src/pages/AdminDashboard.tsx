@@ -33,10 +33,15 @@ export default function AdminDashboard() {
         supabase.from("contact_messages").select("*"),
       ]);
 
-      const allUsers = profilesRes.data || [];
-      const allDeployments = deploymentsRes.data || [];
-      const allFeedback = feedbackRes.data || [];
-      const allContacts = contactsRes.data || [];
+      const usersData = profilesRes.data || [];
+      const deploymentsData = deploymentsRes.data || [];
+      const feedbackData = feedbackRes.data || [];
+      const contactsData = contactsRes.data || [];
+
+      setAllUsers(usersData);
+      setAllDeployments(deploymentsData);
+      setAllFeedback(feedbackData);
+      setAllContacts(contactsData);
 
       setStats({
         users: allUsers.length,
