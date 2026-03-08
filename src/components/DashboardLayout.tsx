@@ -1,7 +1,8 @@
 import { ReactNode, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useAdmin } from "@/hooks/useAdmin";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { Cloud, LayoutDashboard, FolderGit2, Plug, LogOut, Rocket, Activity, Settings, PanelLeftClose, PanelLeft, ArrowLeft } from "lucide-react";
+import { Cloud, LayoutDashboard, FolderGit2, Plug, LogOut, Rocket, Activity, Settings, PanelLeftClose, PanelLeft, ArrowLeft, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -20,9 +21,12 @@ const backButtonRoutes = ["/projects", "/connections", "/deployments", "/monitor
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
+  const { isAdmin } = useAdmin();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+
+  const allNavItems = isAdmin ? [...navItems, { label: "Admin", icon: Shield, path: "/admin" }] : navItems;
 
   const handleSignOut = async () => {
     await signOut();
@@ -70,7 +74,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         )}
 
         <nav className={cn("flex-1 space-y-1", collapsed ? "p-2" : "p-4")}>
-          {navItems.map((item) => {
+          {allNavItems.map((item) => {
             const active = location.pathname === item.path || (item.path !== "/dashboard" && location.pathname.startsWith(item.path));
             const linkContent = (
               <Link
