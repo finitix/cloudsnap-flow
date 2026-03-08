@@ -18,7 +18,7 @@ import About from "./pages/About";
 import Reviews from "./pages/Reviews";
 import ContactSupport from "./pages/ContactSupport";
 import Features from "./pages/Features";
-import Integrations from "./pages/Integrations";
+// Integrations merged into Features page
 import Pricing from "./pages/Pricing";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
