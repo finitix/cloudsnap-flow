@@ -1182,7 +1182,8 @@ async function deployToRender(
   const deployId = deployRes.ok ? (deployRes.data.id || deployRes.data.deploy?.id || serviceId) : serviceId;
 
   let attempts = 0;
-  while (attempts < 90) {
+  const maxPollAttempts = 40; // ~3.3 min max to prevent edge function timeout
+  while (attempts < maxPollAttempts) {
     await new Promise((r) => setTimeout(r, 5000));
     try {
       const statusRes = await safeFetchJson(`${RENDER_API}/services/${serviceId}/deploys?limit=1`, { headers });
