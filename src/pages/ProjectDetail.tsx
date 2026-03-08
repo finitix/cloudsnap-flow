@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Rocket, ExternalLink, Terminal, Cpu, HardDrive, RefreshCw, Trash2, CheckCircle, XCircle, Globe, Server, Plus, X, Settings2, Pencil, ScrollText, AlertTriangle, Zap, Shield, Bell, Activity } from "lucide-react";
 import { toast } from "sonner";
 import AWSInfrastructureDashboard from "@/components/AWSInfrastructureDashboard";
+import AWSMonitoringDashboard from "@/components/AWSMonitoringDashboard";
 
 interface HealLog {
   id: string;
@@ -546,7 +547,14 @@ export default function ProjectDetail() {
 
         {/* AWS Infrastructure Dashboard */}
         {project?.aws_connection_id && (
-          <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+          <>
+            <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+            <AWSMonitoringDashboard
+              projectId={project.id}
+              awsConnectionId={project.aws_connection_id}
+              instanceId={deployments.find((d) => d.provider === "aws" && d.status === "live")?.deploy_id || undefined}
+            />
+          </>
         )}
 
         {/* Deployment History */}
