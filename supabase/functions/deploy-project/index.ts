@@ -1846,11 +1846,51 @@ serve(async (req) => {
     if (action === "delete-project") {
       const { projectId, userId } = body;
       if (!projectId) throw new Error("Missing projectId");
+
+      // Fetch all deployments with their connections to delete from cloud providers
+      const { data: deps } = await supabase.from("deployments").select("*, cloud_connections(*)").eq("project_id", projectId);
+      if (deps && deps.length > 0) {
+        for (const dep of deps) {
+          try {
+            const connection = (dep as any).cloud_connections;
+            if (!connection) continue;
+
+            if (connection.provider === "render" && dep.deploy_id) {
+              const RENDER_API = "https://api.render.com/v1";
+              const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
+              // Delete the Render service
+              await safeFetchJson(`${RENDER_API}/services/${dep.deploy_id}`, { method: "DELETE", headers: hdrs });
+              console.log(`[DELETE] Deleted Render service ${dep.deploy_id}`);
+            } else if (connection.provider === "vercel" && dep.deploy_id) {
+              const VERCEL_API = "https://api.vercel.com";
+              const hdrs = { Authorization: `Bearer ${connection.token}`, "Content-Type": "application/json" };
+              // Delete the Vercel project/deployment
+              await safeFetchJson(`${VERCEL_API}/v13/deployments/${dep.deploy_id}`, { method: "DELETE", headers: hdrs });
+              console.log(`[DELETE] Deleted Vercel deployment ${dep.deploy_id}`);
+            }
+          } catch (err) {
+            console.error(`[DELETE] Failed to delete cloud resource for deployment ${dep.id}:`, err);
+            // Continue deleting other resources even if one fails
+          }
+        }
+      }
+
+      // Delete deployment alerts
+      await supabase.from("deployment_alerts").delete().eq("project_id", projectId);
+      // Delete heal logs for all deployments
+      if (deps) {
+        for (const dep of deps) {
+          await supabase.from("deployment_heal_logs").delete().eq("deployment_id", dep.id);
+        }
+      }
+      // Delete deployments
       await supabase.from("deployments").delete().eq("project_id", projectId);
+      // Delete storage files
       if (userId) {
         const { data: sf } = await supabase.storage.from("project-uploads").list(userId);
         if (sf?.length) await supabase.storage.from("project-uploads").remove(sf.map((f: any) => `${userId}/${f.name}`));
       }
+      // Delete project
       await supabase.from("projects").delete().eq("id", projectId);
       return json({ success: true });
     }
