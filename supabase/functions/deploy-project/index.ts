@@ -628,46 +628,79 @@ function analyzeError(errorMessage: string): ErrorAnalysis {
 
 async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Promise<ErrorAnalysis> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) return analyzeError(errorMessage);
+  if (!LOVABLE_API_KEY) {
+    console.error("LOVABLE_API_KEY not set, using rule-based analysis");
+    return analyzeError(errorMessage);
+  }
 
   try {
     const retryAttempt = projectContext.retryAttempt || 0;
-    // 15-second timeout to prevent hanging
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
+    const errorSnippet = errorMessage.slice(-3000); // Use last 3000 chars (most relevant)
+    
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       signal: controller.signal,
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "google/gemini-2.5-flash",
         messages: [
           {
             role: "system",
-            content: `You are a deployment error analyzer. Analyze the error and provide specific fix commands. Be concise. This is retry ${retryAttempt} — previous fixes failed, suggest DIFFERENT commands.`
+            content: `You are a deployment error expert. Analyze build logs and provide EXACT fix commands.
+Rules:
+- Read the FULL error/log output carefully
+- For Render: provide exact buildCommand and startCommand that will work
+- For Node.js: check if package.json has "start" script, check the actual entry file name
+- For Python: check if requirements.txt exists, detect Flask/Django/FastAPI
+- This is retry attempt ${retryAttempt}. Previous fixes FAILED. You MUST suggest DIFFERENT commands.
+- If retry 0 failed with basic commands, try more specific ones (e.g. checking actual file structure)
+- modifiedBuildCommand and modifiedStartCommand are REQUIRED for Render deployments
+- For Node.js backends in subdirectories, use "cd <dir> && ..." pattern
+- Always include --legacy-peer-deps for npm install`
           },
           {
             role: "user",
-            content: `Error: ${errorMessage.slice(0, 1500)}\nProject: provider=${projectContext.provider || "unknown"}, backend=${projectContext.backend_framework || "none"}, runtime=${projectContext.backendRuntime || "node"}, retry=${retryAttempt}`
+            content: `Provider: ${projectContext.provider || "unknown"}
+Backend Framework: ${projectContext.backend_framework || "none"}
+Runtime: ${projectContext.backendRuntime || "node"}
+Retry Attempt: ${retryAttempt}
+Backend Dir: ${projectContext.backendRootDir || "root"}
+Build Command Used: ${projectContext.backend_build_command || "default"}
+Start Command Used: ${projectContext.backend_start_command || "default"}
+Previous Error: ${projectContext.previousError?.slice(-500) || "none"}
+
+=== ERROR / BUILD LOGS ===
+${errorSnippet}`
           }
         ],
         tools: [{
           type: "function",
           function: {
             name: "analyze_error",
-            description: "Analyze deployment error",
+            description: "Analyze deployment error and provide fix commands",
             parameters: {
               type: "object",
               properties: {
                 category: { type: "string", enum: ["dependency_error", "build_error", "port_error", "env_error", "command_not_found_error", "root_directory_error", "render_build_error", "project_settings_error", "framework_detection_error", "permission_error", "rate_limit_error", "timeout_error", "missing_files_error", "runtime_error", "unknown_error"] },
-                description: { type: "string" },
-                suggestedFix: { type: "string" },
-                modifiedBuildCommand: { type: "string" },
-                modifiedStartCommand: { type: "string" },
-                modifiedInstallCommand: { type: "string" },
+                description: { type: "string", description: "Clear explanation of what went wrong" },
+                suggestedFix: { type: "string", description: "Human-readable fix description" },
+                modifiedBuildCommand: { type: "string", description: "Exact build command to use" },
+                modifiedStartCommand: { type: "string", description: "Exact start command to use" },
+                modifiedInstallCommand: { type: "string", description: "Exact install command to use" },
+                envVars: { 
+                  type: "array", 
+                  items: { 
+                    type: "object", 
+                    properties: { key: { type: "string" }, value: { type: "string" } },
+                    required: ["key", "value"]
+                  },
+                  description: "Environment variables to set"
+                },
               },
-              required: ["category", "description", "suggestedFix"],
+              required: ["category", "description", "suggestedFix", "modifiedBuildCommand", "modifiedStartCommand"],
               additionalProperties: false,
             }
           }
@@ -679,13 +712,15 @@ async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Pr
     clearTimeout(timeout);
 
     if (!response.ok) {
-      console.error("AI gateway returned", response.status);
+      const errText = await response.text().catch(() => "");
+      console.error("AI gateway returned", response.status, errText);
       return analyzeError(errorMessage);
     }
     const result = await response.json();
     const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
       const parsed = JSON.parse(toolCall.function.arguments);
+      console.log("AI analysis result:", JSON.stringify(parsed));
       return {
         category: parsed.category as ErrorCategory,
         description: parsed.description || "AI-analyzed error",
@@ -695,14 +730,16 @@ async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Pr
           modifiedBuildCommand: parsed.modifiedBuildCommand || undefined,
           modifiedStartCommand: parsed.modifiedStartCommand || undefined,
           modifiedInstallCommand: parsed.modifiedInstallCommand || undefined,
+          envVars: parsed.envVars || undefined,
         },
       };
     }
+    console.error("AI returned no tool call:", JSON.stringify(result).slice(0, 500));
   } catch (e: any) {
     if (e.name === "AbortError") {
-      console.error("AI analysis timed out after 15s, falling back to rule-based");
+      console.error("AI analysis timed out after 30s, falling back to rule-based");
     } else {
-      console.error("AI analysis error:", e);
+      console.error("AI analysis error:", e.message || e);
     }
   }
   return analyzeError(errorMessage);
