@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 
 const navLinks = [
-  { label: "Features", path: "/#features" },
-  { label: "Integrations", path: "/#integrations" },
-  { label: "Pricing", path: "/#pricing" },
+  { label: "Features", path: "/features" },
+  { label: "Integrations", path: "/integrations" },
+  { label: "Pricing", path: "/pricing" },
   { label: "About", path: "/about" },
   { label: "Contact", path: "/contact" },
 ];
