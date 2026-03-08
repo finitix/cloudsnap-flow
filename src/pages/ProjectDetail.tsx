@@ -544,6 +544,11 @@ export default function ProjectDetail() {
           )}
         </div>
 
+        {/* AWS Infrastructure Dashboard */}
+        {project?.aws_connection_id && (
+          <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+        )}
+
         {/* Deployment History */}
         <div className="glass-card rounded-xl overflow-hidden">
           <div className="p-5 border-b border-border flex items-center justify-between">
