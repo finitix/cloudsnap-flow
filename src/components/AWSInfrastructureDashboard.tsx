@@ -15,6 +15,8 @@ import {
 interface Props {
   projectId: string;
   awsConnectionId?: string;
+  projectType?: string;
+  databaseEngine?: string;
 }
 
 const RESOURCE_ICONS: Record<string, any> = {
