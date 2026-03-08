@@ -356,7 +356,7 @@ export default function ProjectDetail() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete "{project.name}" permanently?</AlertDialogTitle>
-                <AlertDialogDescription>This will permanently delete the project, all deployments, and files.</AlertDialogDescription>
+                <AlertDialogDescription>This will permanently delete the project, all deployments, files, and any AWS infrastructure (VPC, EC2, RDS, security groups) created for this project.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>

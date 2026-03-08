@@ -1875,6 +1875,38 @@ serve(async (req) => {
         }
       }
 
+      // ── Clean up AWS infrastructure ──
+      const { data: awsInfras } = await supabase.from("aws_infrastructure").select("*").eq("project_id", projectId);
+      if (awsInfras && awsInfras.length > 0) {
+        for (const infra of awsInfras) {
+          try {
+            // Call aws-deploy function to handle full AWS resource cleanup
+            const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+            const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+            await fetch(`${supabaseUrl}/functions/v1/aws-deploy`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${serviceKey}`,
+                "apikey": serviceKey,
+              },
+              body: JSON.stringify({
+                action: "delete-infrastructure",
+                infrastructureId: infra.id,
+              }),
+            });
+            console.log(`[DELETE] AWS infrastructure ${infra.id} cleanup triggered`);
+          } catch (err) {
+            console.error(`[DELETE] Failed to clean up AWS infra ${infra.id}:`, err);
+          }
+        }
+        // Also delete any remaining DB records
+        for (const infra of awsInfras) {
+          await supabase.from("aws_resources").delete().eq("infrastructure_id", infra.id);
+        }
+        await supabase.from("aws_infrastructure").delete().eq("project_id", projectId);
+      }
+
       // Delete deployment alerts
       await supabase.from("deployment_alerts").delete().eq("project_id", projectId);
       // Delete heal logs for all deployments
@@ -1892,6 +1924,7 @@ serve(async (req) => {
       }
       // Delete project
       await supabase.from("projects").delete().eq("id", projectId);
+      return json({ success: true });
       return json({ success: true });
     }
 
