@@ -44,19 +44,19 @@ export default function AdminDashboard() {
       setAllContacts(contactsData);
 
       setStats({
-        users: allUsers.length,
+        users: usersData.length,
         projects: projectsRes.count || 0,
-        deployments: allDeployments.length,
+        deployments: deploymentsData.length,
         connections: connectionsRes.count || 0,
-        feedback: allFeedback.length,
-        contacts: allContacts.length,
-        liveDeployments: allDeployments.filter((d: any) => d.status === "live").length,
-        errorDeployments: allDeployments.filter((d: any) => d.status === "error").length,
-        publishedReviews: allFeedback.filter((f: any) => f.is_published).length,
-        newMessages: allContacts.filter((c: any) => c.status === "new").length,
+        feedback: feedbackData.length,
+        contacts: contactsData.length,
+        liveDeployments: deploymentsData.filter((d: any) => d.status === "live").length,
+        errorDeployments: deploymentsData.filter((d: any) => d.status === "error").length,
+        publishedReviews: feedbackData.filter((f: any) => f.is_published).length,
+        newMessages: contactsData.filter((c: any) => c.status === "new").length,
       });
-      setRecentUsers(allUsers.slice(0, 5));
-      setRecentDeployments(allDeployments.slice(0, 5));
+      setRecentUsers(usersData.slice(0, 5));
+      setRecentDeployments(deploymentsData.slice(0, 5));
     };
     load();
   }, [isAdmin]);
