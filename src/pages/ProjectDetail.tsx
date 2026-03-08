@@ -547,7 +547,14 @@ export default function ProjectDetail() {
 
         {/* AWS Infrastructure Dashboard */}
         {project?.aws_connection_id && (
-          <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+          <>
+            <AWSInfrastructureDashboard projectId={project.id} awsConnectionId={project.aws_connection_id} />
+            <AWSMonitoringDashboard
+              projectId={project.id}
+              awsConnectionId={project.aws_connection_id}
+              instanceId={deployments.find((d) => d.provider === "aws" && d.status === "live")?.deploy_id || undefined}
+            />
+          </>
         )}
 
         {/* Deployment History */}
