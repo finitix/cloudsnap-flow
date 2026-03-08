@@ -366,7 +366,36 @@ export default function ProjectDetail() {
           </AlertDialog>
         </div>
 
-        {/* Project Analysis */}
+        {/* Live URL Banner for AWS deployments */}
+        {(() => {
+          const liveDeployment = deployments.find(d => d.status === "live" && d.live_url);
+          if (!liveDeployment) return null;
+          return (
+            <div className="glass-card rounded-xl p-5 mb-6 border border-green-500/30 bg-green-500/5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-green-500/15 flex items-center justify-center">
+                    <Globe className="h-5 w-5 text-green-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Live URL</p>
+                    <a href={liveDeployment.live_url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-primary hover:underline flex items-center gap-1">
+                      {liveDeployment.live_url} <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-green-500/15 text-green-400 text-xs">LIVE</Badge>
+                  {liveDeployment.provider === "aws" && liveDeployment.deploy_id && (
+                    <Badge variant="outline" className="text-[10px]">{liveDeployment.deploy_id}</Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+
         <div className="glass-card rounded-xl p-6 mb-6">
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             <Terminal className="h-4 w-4 text-primary" /> Project Analysis
