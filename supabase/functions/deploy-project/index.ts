@@ -1875,6 +1875,54 @@ serve(async (req) => {
         }
       }
 
+      // ── Clean up AWS infrastructure ──
+      const { data: awsInfras } = await supabase.from("aws_infrastructure").select("*").eq("project_id", projectId);
+      if (awsInfras && awsInfras.length > 0) {
+        for (const infra of awsInfras) {
+          try {
+            // Call aws-deploy edge function to delete AWS resources
+            const { data: awsConn } = await supabase.from("aws_connections").select("*").eq("id", infra.aws_connection_id).single();
+            if (awsConn) {
+              // Terminate EC2 and RDS resources first
+              const { data: resources } = await supabase.from("aws_resources").select("*").eq("infrastructure_id", infra.id);
+              for (const r of (resources || [])) {
+                try {
+                  if (r.resource_type === "ec2" && r.resource_id) {
+                    await terminateEC2(awsConn, infra.region, r.resource_id);
+                  }
+                  if (r.resource_type === "rds" && r.resource_id) {
+                    await deleteRDS(awsConn, infra.region, r.resource_id);
+                  }
+                } catch (e) { console.error(`[DELETE] AWS resource cleanup failed:`, e); }
+              }
+
+              // Wait briefly for terminations
+              await new Promise(r => setTimeout(r, 3000));
+
+              // Delete networking resources
+              try {
+                if (infra.security_group_id) await awsEC2(awsConn, infra.region, "DeleteSecurityGroup", { GroupId: infra.security_group_id });
+                if (infra.public_subnet_id) await awsEC2(awsConn, infra.region, "DeleteSubnet", { SubnetId: infra.public_subnet_id });
+                if (infra.private_subnet_id) await awsEC2(awsConn, infra.region, "DeleteSubnet", { SubnetId: infra.private_subnet_id });
+                if (infra.internet_gateway_id && infra.vpc_id) {
+                  await awsEC2(awsConn, infra.region, "DetachInternetGateway", { InternetGatewayId: infra.internet_gateway_id, VpcId: infra.vpc_id });
+                  await awsEC2(awsConn, infra.region, "DeleteInternetGateway", { InternetGatewayId: infra.internet_gateway_id });
+                }
+                if (infra.db_subnet_group_name) {
+                  await awsRDS(awsConn, infra.region, "DeleteDBSubnetGroup", { DBSubnetGroupName: infra.db_subnet_group_name });
+                }
+                if (infra.vpc_id) await awsEC2(awsConn, infra.region, "DeleteVpc", { VpcId: infra.vpc_id });
+              } catch (e) { console.error(`[DELETE] AWS VPC cleanup error:`, e); }
+            }
+            // Delete DB records
+            await supabase.from("aws_resources").delete().eq("infrastructure_id", infra.id);
+          } catch (err) {
+            console.error(`[DELETE] Failed to clean up AWS infra ${infra.id}:`, err);
+          }
+        }
+        await supabase.from("aws_infrastructure").delete().eq("project_id", projectId);
+      }
+
       // Delete deployment alerts
       await supabase.from("deployment_alerts").delete().eq("project_id", projectId);
       // Delete heal logs for all deployments
@@ -1892,6 +1940,7 @@ serve(async (req) => {
       }
       // Delete project
       await supabase.from("projects").delete().eq("id", projectId);
+      return json({ success: true });
       return json({ success: true });
     }
 
