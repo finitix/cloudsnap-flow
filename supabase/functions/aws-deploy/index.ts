@@ -368,12 +368,41 @@ serve(async (req) => {
       }).select().single();
       const deploymentId = deployRec?.id;
 
-      // ── Step 1: Create VPC ──
+      // ── Step 1: Create or Reuse VPC ──
       try {
+        let vpcId = "";
         const vpcRes = await ec2Action(creds, "CreateVpc", { "CidrBlock": "10.0.0.0/16" });
-        if (!vpcRes.ok) throw new Error("VPC creation failed: " + vpcRes.rawText);
-        const vpcId = vpcRes.data?.CreateVpcResponse?.vpc?.vpcId || extractTag(vpcRes.rawText, "vpcId");
-        if (!vpcId) throw new Error("Could not extract VPC ID");
+        
+        if (vpcRes.rawText?.includes("VpcLimitExceeded")) {
+          // VPC limit reached — try to find and reuse an existing cloudsnap VPC
+          console.log("VPC limit reached, attempting to reuse existing cloudsnap VPC...");
+          const descRes = await ec2Action(creds, "DescribeVpcs", {
+            "Filter.1.Name": "tag:cloudsnap-project",
+            "Filter.1.Value.1": "*",
+          });
+          const existingVpcId = extractTag(descRes.rawText, "vpcId");
+          
+          if (!existingVpcId) {
+            // No cloudsnap VPC found, try to find default VPC
+            const defaultRes = await ec2Action(creds, "DescribeVpcs", {
+              "Filter.1.Name": "isDefault",
+              "Filter.1.Value.1": "true",
+            });
+            const defaultVpcId = extractTag(defaultRes.rawText, "vpcId");
+            if (defaultVpcId) {
+              vpcId = defaultVpcId;
+              console.log("Using default VPC:", vpcId);
+            } else {
+              throw new Error("AWS VPC limit reached and no existing VPC found to reuse. Please delete unused VPCs in your AWS console (us-east-1) and retry.");
+            }
+          } else {
+            vpcId = existingVpcId;
+            console.log("Reusing existing cloudsnap VPC:", vpcId);
+          }
+        } else {
+          vpcId = vpcRes.data?.CreateVpcResponse?.vpc?.vpcId || extractTag(vpcRes.rawText, "vpcId");
+          if (!vpcId) throw new Error("Could not extract VPC ID");
+        }
 
         // Tag VPC
         await ec2Action(creds, "CreateTags", {
@@ -389,15 +418,29 @@ serve(async (req) => {
 
         await supabase.from("aws_infrastructure").update({ vpc_id: vpcId, status: "creating_subnets" }).eq("id", infra.id);
 
-        // ── Step 2: Create Internet Gateway ──
-        const igwRes = await ec2Action(creds, "CreateInternetGateway", {});
-        const igwId = extractTag(igwRes.rawText, "internetGatewayId");
+        // ── Step 2: Create or find Internet Gateway ──
+        let igwId = "";
+        // Check for existing IGW attached to this VPC
+        const descIgwRes = await ec2Action(creds, "DescribeInternetGateways", {
+          "Filter.1.Name": "attachment.vpc-id",
+          "Filter.1.Value.1": vpcId,
+        });
+        igwId = extractTag(descIgwRes.rawText, "internetGatewayId") || "";
+        
+        if (!igwId) {
+          const igwRes = await ec2Action(creds, "CreateInternetGateway", {});
+          igwId = extractTag(igwRes.rawText, "internetGatewayId") || "";
+          if (igwId) {
+            await ec2Action(creds, "AttachInternetGateway", { InternetGatewayId: igwId, VpcId: vpcId });
+          }
+        }
         if (igwId) {
-          await ec2Action(creds, "AttachInternetGateway", { InternetGatewayId: igwId, VpcId: vpcId });
           await supabase.from("aws_infrastructure").update({ internet_gateway_id: igwId }).eq("id", infra.id);
         }
 
         // ── Step 3: Create Subnets ──
+        // Use a random offset (10-250) for CIDR to avoid conflicts when reusing VPC
+        const cidrOffset = Math.floor(Math.random() * 240) + 10;
         // Get available AZs
         const azRes = await ec2Action(creds, "DescribeAvailabilityZones", { "Filter.1.Name": "state", "Filter.1.Value.1": "available" });
         const azText = azRes.rawText;
@@ -408,21 +451,40 @@ serve(async (req) => {
 
         // Public subnet
         const pubSubRes = await ec2Action(creds, "CreateSubnet", {
-          VpcId: vpcId, CidrBlock: "10.0.1.0/24", AvailabilityZone: az1,
+          VpcId: vpcId, CidrBlock: `10.0.${cidrOffset}.0/24`, AvailabilityZone: az1,
         });
-        const pubSubId = extractTag(pubSubRes.rawText, "subnetId");
+        let pubSubId = extractTag(pubSubRes.rawText, "subnetId");
+        
+        // If CIDR conflict, try to find existing subnets in this VPC
+        if (!pubSubId && pubSubRes.rawText?.includes("InvalidSubnet.Conflict")) {
+          console.log("Subnet CIDR conflict, looking for existing subnets...");
+          const descSubRes = await ec2Action(creds, "DescribeSubnets", {
+            "Filter.1.Name": "vpc-id", "Filter.1.Value.1": vpcId,
+          });
+          const subnetIds = (descSubRes.rawText.match(/<subnetId>([^<]+)<\/subnetId>/g) || [])
+            .map(m => m.replace(/<\/?subnetId>/g, ""));
+          pubSubId = subnetIds[0] || "";
+        }
 
         // Private subnet
         const privSubRes = await ec2Action(creds, "CreateSubnet", {
-          VpcId: vpcId, CidrBlock: "10.0.2.0/24", AvailabilityZone: az1,
+          VpcId: vpcId, CidrBlock: `10.0.${cidrOffset + 1}.0/24`, AvailabilityZone: az1,
         });
-        const privSubId = extractTag(privSubRes.rawText, "subnetId");
+        let privSubId = extractTag(privSubRes.rawText, "subnetId");
+        if (!privSubId && privSubRes.rawText?.includes("InvalidSubnet.Conflict")) {
+          const descSubRes = await ec2Action(creds, "DescribeSubnets", {
+            "Filter.1.Name": "vpc-id", "Filter.1.Value.1": vpcId,
+          });
+          const subnetIds = (descSubRes.rawText.match(/<subnetId>([^<]+)<\/subnetId>/g) || [])
+            .map(m => m.replace(/<\/?subnetId>/g, ""));
+          privSubId = subnetIds[1] || subnetIds[0] || "";
+        }
 
         // Second subnet for RDS (needs 2 AZs)
         let dbSubnet2Id = "";
         if (databaseEngine && databaseEngine !== "none") {
           const dbSub2Res = await ec2Action(creds, "CreateSubnet", {
-            VpcId: vpcId, CidrBlock: "10.0.3.0/24", AvailabilityZone: az2,
+            VpcId: vpcId, CidrBlock: `10.0.${cidrOffset + 2}.0/24`, AvailabilityZone: az2,
           });
           dbSubnet2Id = extractTag(dbSub2Res.rawText, "subnetId") || "";
         }
