@@ -4,6 +4,7 @@ import { useAdmin } from "@/hooks/useAdmin";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/AdminLayout";
 import { Shield, Users, FolderGit2, Rocket, Plug, Star, Mail, CheckCircle, AlertTriangle, Clock, TrendingUp } from "lucide-react";
+import AdminAnalyticsCharts from "@/components/admin/AdminAnalyticsCharts";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -15,6 +16,10 @@ export default function AdminDashboard() {
   });
   const [recentUsers, setRecentUsers] = useState<any[]>([]);
   const [recentDeployments, setRecentDeployments] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [allDeployments, setAllDeployments] = useState<any[]>([]);
+  const [allFeedback, setAllFeedback] = useState<any[]>([]);
+  const [allContacts, setAllContacts] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -22,31 +27,36 @@ export default function AdminDashboard() {
       const [profilesRes, projectsRes, deploymentsRes, connectionsRes, feedbackRes, contactsRes] = await Promise.all([
         supabase.from("profiles").select("*").order("created_at", { ascending: false }),
         supabase.from("projects").select("id", { count: "exact", head: true }),
-        supabase.from("deployments").select("*").order("created_at", { ascending: false }).limit(10),
+        supabase.from("deployments").select("*").order("created_at", { ascending: false }),
         supabase.from("cloud_connections").select("id", { count: "exact", head: true }),
         supabase.from("feedback").select("*"),
         supabase.from("contact_messages").select("*"),
       ]);
 
-      const allUsers = profilesRes.data || [];
-      const allDeployments = deploymentsRes.data || [];
-      const allFeedback = feedbackRes.data || [];
-      const allContacts = contactsRes.data || [];
+      const usersData = profilesRes.data || [];
+      const deploymentsData = deploymentsRes.data || [];
+      const feedbackData = feedbackRes.data || [];
+      const contactsData = contactsRes.data || [];
+
+      setAllUsers(usersData);
+      setAllDeployments(deploymentsData);
+      setAllFeedback(feedbackData);
+      setAllContacts(contactsData);
 
       setStats({
-        users: allUsers.length,
+        users: usersData.length,
         projects: projectsRes.count || 0,
-        deployments: allDeployments.length,
+        deployments: deploymentsData.length,
         connections: connectionsRes.count || 0,
-        feedback: allFeedback.length,
-        contacts: allContacts.length,
-        liveDeployments: allDeployments.filter((d: any) => d.status === "live").length,
-        errorDeployments: allDeployments.filter((d: any) => d.status === "error").length,
-        publishedReviews: allFeedback.filter((f: any) => f.is_published).length,
-        newMessages: allContacts.filter((c: any) => c.status === "new").length,
+        feedback: feedbackData.length,
+        contacts: contactsData.length,
+        liveDeployments: deploymentsData.filter((d: any) => d.status === "live").length,
+        errorDeployments: deploymentsData.filter((d: any) => d.status === "error").length,
+        publishedReviews: feedbackData.filter((f: any) => f.is_published).length,
+        newMessages: contactsData.filter((c: any) => c.status === "new").length,
       });
-      setRecentUsers(allUsers.slice(0, 5));
-      setRecentDeployments(allDeployments.slice(0, 5));
+      setRecentUsers(usersData.slice(0, 5));
+      setRecentDeployments(deploymentsData.slice(0, 5));
     };
     load();
   }, [isAdmin]);
@@ -97,6 +107,9 @@ export default function AdminDashboard() {
             </div>
           ))}
         </div>
+
+        {/* Analytics Charts */}
+        <AdminAnalyticsCharts users={allUsers} deployments={allDeployments} feedback={allFeedback} contacts={allContacts} />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Users */}
