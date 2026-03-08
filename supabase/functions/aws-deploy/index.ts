@@ -791,15 +791,109 @@ serve(async (req) => {
       });
     }
 
+    // ── CloudWatch Metrics ──
+    if (action === "get-cloudwatch-metrics") {
+      const { awsConnectionId, instanceId } = params;
+      const { data: awsConn } = await supabase.from("aws_connections").select("*").eq("id", awsConnectionId).eq("user_id", userId).single();
+      if (!awsConn) return json({ success: false, error: "AWS connection not found" });
+
+      const creds: AwsCreds = { accessKeyId: awsConn.access_key_id, secretAccessKey: awsConn.secret_access_key, region: awsConn.default_region };
+
+      const now = new Date();
+      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+      const cwBody = ec2Params({
+        Action: "GetMetricStatistics", Version: "2010-08-01",
+        Namespace: "AWS/EC2", MetricName: "CPUUtilization",
+        "Dimensions.member.1.Name": "InstanceId", "Dimensions.member.1.Value": instanceId,
+        StartTime: oneHourAgo.toISOString(), EndTime: now.toISOString(),
+        Period: "300", "Statistics.member.1": "Average",
+      });
+      const cpuRes = await awsRequest(creds, "monitoring", "POST", "/", cwBody);
+      const cpuDatapoints = extractDatapoints(cpuRes.rawText);
+
+      const netBody = ec2Params({
+        Action: "GetMetricStatistics", Version: "2010-08-01",
+        Namespace: "AWS/EC2", MetricName: "NetworkIn",
+        "Dimensions.member.1.Name": "InstanceId", "Dimensions.member.1.Value": instanceId,
+        StartTime: oneHourAgo.toISOString(), EndTime: now.toISOString(),
+        Period: "300", "Statistics.member.1": "Average",
+      });
+      const netRes = await awsRequest(creds, "monitoring", "POST", "/", netBody);
+      const netDatapoints = extractDatapoints(netRes.rawText);
+
+      return json({ success: true, metrics: { cpu: cpuDatapoints, networkIn: netDatapoints, instanceId } });
+    }
+
+    // ── Get Instance Logs ──
+    if (action === "get-instance-logs") {
+      const { awsConnectionId, instanceId } = params;
+      const { data: awsConn } = await supabase.from("aws_connections").select("*").eq("id", awsConnectionId).eq("user_id", userId).single();
+      if (!awsConn) return json({ success: false, error: "AWS connection not found" });
+
+      const creds: AwsCreds = { accessKeyId: awsConn.access_key_id, secretAccessKey: awsConn.secret_access_key, region: awsConn.default_region };
+      const logRes = await ec2Action(creds, "GetConsoleOutput", { InstanceId: instanceId });
+      const outputB64 = extractTag(logRes.rawText, "output");
+      let logLines: string[] = [];
+      if (outputB64) {
+        try {
+          const decoded = atob(outputB64);
+          logLines = decoded.split("\n").filter((l: string) => l.trim()).slice(-100);
+        } catch { logLines = ["Failed to decode console output"]; }
+      }
+      return json({ success: true, logs: logLines });
+    }
+
+    // ── Auto-Stop Idle Instances ──
+    if (action === "auto-stop-idle") {
+      const { data: resources } = await supabase
+        .from("aws_resources").select("*")
+        .eq("resource_type", "ec2").eq("status", "running").eq("auto_stop_enabled", true);
+
+      if (!resources || resources.length === 0) return json({ success: true, stopped: 0 });
+
+      let stoppedCount = 0;
+      const idleThreshold = FREE_TIER.idleTimeoutMinutes * 60 * 1000;
+
+      for (const r of resources) {
+        const lastActive = r.last_active_at ? new Date(r.last_active_at).getTime() : new Date(r.created_at).getTime();
+        if (Date.now() - lastActive > idleThreshold && r.resource_id) {
+          const { data: infra } = await supabase.from("aws_infrastructure").select("aws_connection_id, region").eq("id", r.infrastructure_id).single();
+          if (!infra) continue;
+          const { data: awsConn } = await supabase.from("aws_connections").select("*").eq("id", infra.aws_connection_id).single();
+          if (!awsConn) continue;
+
+          const creds: AwsCreds = { accessKeyId: awsConn.access_key_id, secretAccessKey: awsConn.secret_access_key, region: infra.region };
+          try {
+            await ec2Action(creds, "StopInstances", { "InstanceId.1": r.resource_id });
+            await supabase.from("aws_resources").update({ status: "stopped" }).eq("id", r.id);
+            stoppedCount++;
+          } catch (e) { console.error("Auto-stop failed:", r.resource_id, e); }
+        }
+      }
+      return json({ success: true, stopped: stoppedCount });
+    }
+
     return json({ error: "Unknown action: " + action }, 400);
   } catch (err: any) {
     return json({ error: err.message || "Internal error" }, 500);
   }
 });
 
-// Helper to extract XML tag value
 function extractTag(xml: string, tag: string): string {
   const regex = new RegExp(`<${tag}>([^<]+)</${tag}>`);
   const match = xml.match(regex);
   return match?.[1] || "";
+}
+
+function extractDatapoints(xml: string): Array<{ Average: number; Timestamp: string }> {
+  const points: Array<{ Average: number; Timestamp: string }> = [];
+  const memberRegex = /<member>(.*?)<\/member>/gs;
+  let match;
+  while ((match = memberRegex.exec(xml)) !== null) {
+    const avg = extractTag(match[1], "Average");
+    const ts = extractTag(match[1], "Timestamp");
+    if (avg || ts) points.push({ Average: parseFloat(avg) || 0, Timestamp: ts || "" });
+  }
+  return points.sort((a, b) => new Date(a.Timestamp).getTime() - new Date(b.Timestamp).getTime());
 }
