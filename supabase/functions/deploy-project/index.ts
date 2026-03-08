@@ -613,6 +613,7 @@ async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Pr
   if (!LOVABLE_API_KEY) return analyzeError(errorMessage);
 
   try {
+    const retryAttempt = projectContext.retryAttempt || 0;
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
@@ -621,29 +622,41 @@ async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Pr
         messages: [
           {
             role: "system",
-            content: `You are a deployment error analyzer. Analyze the error and call analyze_error. Categories: dependency_error, build_error, port_error, env_error, command_not_found_error, root_directory_error, render_build_error, project_settings_error, framework_detection_error, permission_error, rate_limit_error, timeout_error, missing_files_error, runtime_error, unknown_error. Provide specific fix commands.`
+            content: `You are a deployment error analyzer for cloud platforms (Vercel, Render). You must analyze the EXACT error and provide SPECIFIC, ACTIONABLE fix commands — not generic retries.
+
+For Render Node.js: build command should include "npm install", start command should point to the correct entry file. Default port on Render is 10000, use PORT env var.
+For Render Python: build should "pip install -r requirements.txt", start should use correct runner (gunicorn/uvicorn/python).
+For Vercel: fix framework detection, install commands, output directories.
+
+IMPORTANT: This is retry attempt ${retryAttempt}. Previous fixes FAILED. You MUST suggest DIFFERENT commands than standard defaults. Analyze the actual error text carefully.
+
+Common Render issues:
+- "exited with code 1" during build = npm install failed, try --legacy-peer-deps or check node version
+- "exited with code 127" = command not found, wrong start command
+- Build succeeds but deploy fails = wrong start command or missing PORT binding
+- Python: missing gunicorn/uvicorn in requirements.txt`
           },
           {
             role: "user",
-            content: `Error: ${errorMessage.slice(0, 2000)}\n\nProject: framework=${projectContext.framework || "unknown"}, type=${projectContext.project_type || "unknown"}, frontend=${projectContext.frontend_framework || "none"}, backend=${projectContext.backend_framework || "none"}, provider=${projectContext.provider || "unknown"}, runtime=${projectContext.backendRuntime || "node"}`
+            content: `Error: ${errorMessage.slice(0, 3000)}\n\nProject context: framework=${projectContext.framework || "unknown"}, type=${projectContext.project_type || "unknown"}, frontend=${projectContext.frontend_framework || "none"}, backend=${projectContext.backend_framework || "none"}, provider=${projectContext.provider || "unknown"}, runtime=${projectContext.backendRuntime || "node"}, backend_build="${projectContext.backend_build_command || ""}", backend_start="${projectContext.backend_start_command || ""}", retry=${retryAttempt}`
           }
         ],
         tools: [{
           type: "function",
           function: {
             name: "analyze_error",
-            description: "Analyze deployment error",
+            description: "Analyze deployment error and provide specific fix commands",
             parameters: {
               type: "object",
               properties: {
                 category: { type: "string", enum: ["dependency_error", "build_error", "port_error", "env_error", "command_not_found_error", "root_directory_error", "render_build_error", "project_settings_error", "framework_detection_error", "permission_error", "rate_limit_error", "timeout_error", "missing_files_error", "runtime_error", "unknown_error"] },
-                description: { type: "string" },
-                suggestedFix: { type: "string" },
-                modifiedBuildCommand: { type: "string" },
-                modifiedStartCommand: { type: "string" },
-                modifiedInstallCommand: { type: "string" },
+                description: { type: "string", description: "Specific description of what went wrong" },
+                suggestedFix: { type: "string", description: "Human-readable explanation of the fix" },
+                modifiedBuildCommand: { type: "string", description: "Exact build command to use (e.g. 'cd services && npm install --legacy-peer-deps')" },
+                modifiedStartCommand: { type: "string", description: "Exact start command to use (e.g. 'cd services && node index.js')" },
+                modifiedInstallCommand: { type: "string", description: "Install command override" },
               },
-              required: ["category", "description", "suggestedFix"],
+              required: ["category", "description", "suggestedFix", "modifiedBuildCommand", "modifiedStartCommand"],
               additionalProperties: false,
             }
           }
@@ -652,7 +665,10 @@ async function analyzeErrorWithAI(errorMessage: string, projectContext: any): Pr
       }),
     });
 
-    if (!response.ok) return analyzeError(errorMessage);
+    if (!response.ok) {
+      console.error("AI gateway returned", response.status);
+      return analyzeError(errorMessage);
+    }
     const result = await response.json();
     const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
