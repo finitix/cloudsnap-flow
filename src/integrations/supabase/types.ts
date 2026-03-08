@@ -14,6 +14,185 @@ export type Database = {
   }
   public: {
     Tables: {
+      aws_connections: {
+        Row: {
+          access_key_id: string
+          connection_type: string
+          created_at: string
+          default_region: string
+          display_name: string
+          free_tier_alerts: boolean
+          id: string
+          is_active: boolean
+          role_arn: string | null
+          secret_access_key: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_key_id: string
+          connection_type?: string
+          created_at?: string
+          default_region?: string
+          display_name?: string
+          free_tier_alerts?: boolean
+          id?: string
+          is_active?: boolean
+          role_arn?: string | null
+          secret_access_key: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_key_id?: string
+          connection_type?: string
+          created_at?: string
+          default_region?: string
+          display_name?: string
+          free_tier_alerts?: boolean
+          id?: string
+          is_active?: boolean
+          role_arn?: string | null
+          secret_access_key?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      aws_infrastructure: {
+        Row: {
+          aws_connection_id: string
+          created_at: string
+          db_subnet_group_name: string | null
+          error_message: string | null
+          estimated_monthly_cost: number | null
+          id: string
+          internet_gateway_id: string | null
+          private_subnet_id: string | null
+          project_id: string
+          public_subnet_id: string | null
+          region: string
+          security_group_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          vpc_id: string | null
+        }
+        Insert: {
+          aws_connection_id: string
+          created_at?: string
+          db_subnet_group_name?: string | null
+          error_message?: string | null
+          estimated_monthly_cost?: number | null
+          id?: string
+          internet_gateway_id?: string | null
+          private_subnet_id?: string | null
+          project_id: string
+          public_subnet_id?: string | null
+          region?: string
+          security_group_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          vpc_id?: string | null
+        }
+        Update: {
+          aws_connection_id?: string
+          created_at?: string
+          db_subnet_group_name?: string | null
+          error_message?: string | null
+          estimated_monthly_cost?: number | null
+          id?: string
+          internet_gateway_id?: string | null
+          private_subnet_id?: string | null
+          project_id?: string
+          public_subnet_id?: string | null
+          region?: string
+          security_group_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          vpc_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aws_infrastructure_aws_connection_id_fkey"
+            columns: ["aws_connection_id"]
+            isOneToOne: false
+            referencedRelation: "aws_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "aws_infrastructure_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      aws_resources: {
+        Row: {
+          auto_stop_enabled: boolean | null
+          config: Json | null
+          created_at: string
+          id: string
+          infrastructure_id: string
+          last_active_at: string | null
+          monthly_cost_estimate: number | null
+          public_ip: string | null
+          public_url: string | null
+          resource_arn: string | null
+          resource_id: string | null
+          resource_type: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_stop_enabled?: boolean | null
+          config?: Json | null
+          created_at?: string
+          id?: string
+          infrastructure_id: string
+          last_active_at?: string | null
+          monthly_cost_estimate?: number | null
+          public_ip?: string | null
+          public_url?: string | null
+          resource_arn?: string | null
+          resource_id?: string | null
+          resource_type: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_stop_enabled?: boolean | null
+          config?: Json | null
+          created_at?: string
+          id?: string
+          infrastructure_id?: string
+          last_active_at?: string | null
+          monthly_cost_estimate?: number | null
+          public_ip?: string | null
+          public_url?: string | null
+          resource_arn?: string | null
+          resource_id?: string | null
+          resource_type?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aws_resources_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "aws_infrastructure"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cloud_connections: {
         Row: {
           connected_at: string
@@ -315,11 +494,14 @@ export type Database = {
       }
       projects: {
         Row: {
+          aws_connection_id: string | null
+          aws_region: string | null
           backend_build_command: string | null
           backend_framework: string | null
           backend_start_command: string | null
           build_command: string | null
           created_at: string
+          database_engine: string | null
           framework: string | null
           frontend_build_command: string | null
           frontend_framework: string | null
@@ -335,11 +517,14 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          aws_connection_id?: string | null
+          aws_region?: string | null
           backend_build_command?: string | null
           backend_framework?: string | null
           backend_start_command?: string | null
           build_command?: string | null
           created_at?: string
+          database_engine?: string | null
           framework?: string | null
           frontend_build_command?: string | null
           frontend_framework?: string | null
@@ -355,11 +540,14 @@ export type Database = {
           user_id: string
         }
         Update: {
+          aws_connection_id?: string | null
+          aws_region?: string | null
           backend_build_command?: string | null
           backend_framework?: string | null
           backend_start_command?: string | null
           build_command?: string | null
           created_at?: string
+          database_engine?: string | null
           framework?: string | null
           frontend_build_command?: string | null
           frontend_framework?: string | null
@@ -374,7 +562,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "projects_aws_connection_id_fkey"
+            columns: ["aws_connection_id"]
+            isOneToOne: false
+            referencedRelation: "aws_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
