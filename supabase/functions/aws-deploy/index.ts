@@ -418,11 +418,23 @@ serve(async (req) => {
 
         await supabase.from("aws_infrastructure").update({ vpc_id: vpcId, status: "creating_subnets" }).eq("id", infra.id);
 
-        // ── Step 2: Create Internet Gateway ──
-        const igwRes = await ec2Action(creds, "CreateInternetGateway", {});
-        const igwId = extractTag(igwRes.rawText, "internetGatewayId");
+        // ── Step 2: Create or find Internet Gateway ──
+        let igwId = "";
+        // Check for existing IGW attached to this VPC
+        const descIgwRes = await ec2Action(creds, "DescribeInternetGateways", {
+          "Filter.1.Name": "attachment.vpc-id",
+          "Filter.1.Value.1": vpcId,
+        });
+        igwId = extractTag(descIgwRes.rawText, "internetGatewayId") || "";
+        
+        if (!igwId) {
+          const igwRes = await ec2Action(creds, "CreateInternetGateway", {});
+          igwId = extractTag(igwRes.rawText, "internetGatewayId") || "";
+          if (igwId) {
+            await ec2Action(creds, "AttachInternetGateway", { InternetGatewayId: igwId, VpcId: vpcId });
+          }
+        }
         if (igwId) {
-          await ec2Action(creds, "AttachInternetGateway", { InternetGatewayId: igwId, VpcId: vpcId });
           await supabase.from("aws_infrastructure").update({ internet_gateway_id: igwId }).eq("id", infra.id);
         }
 
