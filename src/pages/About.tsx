@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Zap, Shield, Globe, Target, Sparkles, Rocket, Heart, Eye,
-  ArrowRight, Code, CheckCircle, Layers, Users, Briefcase, ExternalLink
+  Zap, Shield, Globe, Sparkles, Rocket, Heart, ArrowRight,
+  Code, Layers, Briefcase, Building2, Lightbulb, Target,
+  CheckCircle, Monitor, Database, Cloud, Lock, Users, BarChart3
 } from "lucide-react";
 
 const timeline = [
@@ -15,9 +16,22 @@ const timeline = [
 ];
 
 const values = [
-  { icon: Heart, title: "Developer First", desc: "Every feature reduces friction and saves developer time." },
-  { icon: Shield, title: "Security By Default", desc: "Row-level security, encrypted tokens, zero source storage." },
-  { icon: Zap, title: "Radically Simple", desc: "If it takes more than one click, we haven't finished building it." },
+  { icon: Heart, title: "Developer First", desc: "Every feature reduces friction and saves developer time. We build tools we'd want to use ourselves." },
+  { icon: Shield, title: "Security By Default", desc: "Row-level security, encrypted tokens, zero source storage. No shortcuts on protecting your data." },
+  { icon: Zap, title: "Radically Simple", desc: "If it takes more than one click, we haven't finished building it. Simplicity is our north star." },
+];
+
+const products = [
+  { icon: Cloud, title: "Cloudsnap Studio", desc: "Unified cloud deployment platform. Deploy, monitor, and manage applications across AWS, GCP, Azure, and more — from a single dashboard.", status: "Live" },
+  { icon: Code, title: "Finitix DevKit", desc: "Developer productivity toolkit with AI-powered code analysis, automated testing, and intelligent debugging.", status: "Coming 2027" },
+  { icon: Database, title: "Finitix Data Engine", desc: "Managed database orchestration. Provision, scale, and monitor databases across providers with zero config.", status: "Coming 2027" },
+];
+
+const stats = [
+  { value: "2026", label: "Founded" },
+  { value: "10+", label: "Integrations" },
+  { value: "2K+", label: "Developers" },
+  { value: "99.9%", label: "Uptime" },
 ];
 
 export default function About() {
@@ -27,90 +41,81 @@ export default function About() {
       <section className="section-padding bg-background">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <Badge variant="secondary" className="mb-6 px-4 py-1.5 text-xs font-medium bg-primary/5 text-primary border-primary/20">
-            <Sparkles className="h-3 w-3 mr-1.5" /> Our Story
+            <Sparkles className="h-3 w-3 mr-1.5" /> About Finitix
           </Badge>
           <h1 className="text-4xl md:text-[52px] font-extrabold tracking-tight leading-[1.1] text-foreground mb-6">
-            Built by a developer who was<br className="hidden md:block" />
-            tired of switching dashboards.
+            Building the future of{" "}
+            <span className="gradient-text">developer infrastructure.</span>
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            Cloudsnap Studio was born out of frustration — and a dream to make cloud management 
-            feel effortless for every developer on the planet.
+            Finitix is a developer-first technology company on a mission to eliminate infrastructure 
+            complexity — so developers can focus on what they do best: building great products.
           </p>
         </div>
       </section>
 
-      {/* ═══ FOUNDER ═══ */}
+      {/* ═══ WHO WE ARE ═══ */}
       <section className="bg-secondary/30 section-padding">
         <div className="max-w-5xl mx-auto px-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10 items-start">
-            {/* Left — Photo */}
-            <div className="text-center md:text-left">
-              <div className="h-32 w-32 rounded-full bg-primary/10 flex items-center justify-center mx-auto md:mx-0 mb-4">
-                <Users className="h-12 w-12 text-primary/40" />
-              </div>
-              <h3 className="text-xl font-bold text-foreground">Jnaneswar Kandukuri</h3>
-              <p className="text-sm text-muted-foreground mb-3">Founder & CEO, Finitix</p>
-              <div className="flex items-center gap-3 justify-center md:justify-start">
-                <a href="#" className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">Twitter <ExternalLink className="h-3 w-3" /></a>
-                <a href="#" className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">LinkedIn <ExternalLink className="h-3 w-3" /></a>
-                <a href="#" className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">GitHub <ExternalLink className="h-3 w-3" /></a>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Who We Are</p>
+              <h2 className="text-3xl font-bold text-foreground mb-5">A company built by developers, for developers.</h2>
+              <div className="space-y-4 text-muted-foreground leading-relaxed">
+                <p>
+                  Finitix was founded in 2026 with a simple observation: developers spend too much time 
+                  fighting infrastructure instead of building products. Between managing five different cloud 
+                  dashboards, writing endless YAML configurations, and debugging deployment pipelines at 2am — 
+                  something had to change.
+                </p>
+                <p>
+                  We started with <span className="text-foreground font-medium">Cloudsnap Studio</span>, 
+                  our flagship product that unifies cloud deployment into a single intelligent dashboard. 
+                  But our vision goes far beyond one product — we're building an entire ecosystem of 
+                  developer tools that make infrastructure invisible.
+                </p>
+                <p>
+                  At Finitix, we believe that the best infrastructure is the kind you don't have to think about. 
+                  Our tools handle the complexity behind the scenes so you can ship faster, sleep better, 
+                  and focus on code that matters.
+                </p>
               </div>
             </div>
-
-            {/* Right — Story */}
-            <div className="md:col-span-2 space-y-4 text-muted-foreground leading-relaxed">
-              <p>
-                I started building Cloudsnap Studio because I was tired. Tired of switching between five different cloud dashboards 
-                every single day. Tired of writing YAML files. Tired of debugging deployment pipelines at 2am.
-              </p>
-              <p>
-                As a full-stack developer, I spent more time configuring infrastructure than actually building products. 
-                I knew there had to be a better way — a single dashboard where I could connect all my clouds, 
-                deploy with one click, and let AI handle the failures.
-              </p>
-              <p>
-                That's why I built Cloudsnap. Not as another CI/CD tool, but as a deployment intelligence platform 
-                designed for developers who care about shipping fast and sleeping well at night.
-              </p>
-              <p className="text-foreground font-medium">
-                Our vision: make cloud deployment as easy as saving a file. We're just getting started.
-              </p>
+            <div className="grid grid-cols-2 gap-4">
+              {stats.map((s) => (
+                <div key={s.label} className="bg-card border border-border rounded-xl p-6 text-center hover:shadow-card-hover transition-all">
+                  <p className="text-3xl font-extrabold text-foreground mb-1">{s.value}</p>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      {/* ═══ ABOUT FINITIX ═══ */}
+      {/* ═══ PRODUCTS ═══ */}
       <section className="section-padding bg-background">
         <div className="max-w-5xl mx-auto px-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">About Finitix</p>
-              <h2 className="text-3xl font-bold text-foreground mb-4">The company behind Cloudsnap</h2>
-              <p className="text-muted-foreground leading-relaxed mb-4">
-                Finitix is building developer tools that remove infrastructure complexity so developers 
-                can focus on what matters — building products that change the world.
-              </p>
-              <p className="text-muted-foreground leading-relaxed">
-                We're a remote-first team passionate about great developer experience, clean code, 
-                and making powerful tools accessible to everyone.
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-card border border-border rounded-xl p-5 text-center">
-                <p className="text-2xl font-extrabold text-foreground">2026</p>
-                <p className="text-xs text-muted-foreground mt-1">Founded</p>
+          <div className="text-center mb-12">
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Our Products</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">Tools that empower developers</h2>
+            <p className="text-muted-foreground max-w-xl mx-auto">From deployment to data, we're building the infrastructure layer developers deserve.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {products.map((p) => (
+              <div key={p.title} className="bg-card border border-border rounded-xl p-6 hover:shadow-card-hover hover:-translate-y-0.5 transition-all group">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="h-11 w-11 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                    <p.icon className="h-5 w-5 text-primary" />
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ${p.status === "Live" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                    {p.status}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-foreground mb-2">{p.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{p.desc}</p>
               </div>
-              <div className="bg-card border border-border rounded-xl p-5 text-center">
-                <p className="text-2xl font-extrabold text-foreground">10+</p>
-                <p className="text-xs text-muted-foreground mt-1">Integrations</p>
-              </div>
-              <div className="bg-card border border-border rounded-xl p-5 text-center">
-                <p className="text-2xl font-extrabold text-foreground">2K+</p>
-                <p className="text-xs text-muted-foreground mt-1">Developers</p>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -118,8 +123,9 @@ export default function About() {
       {/* ═══ MISSION ═══ */}
       <section className="bg-secondary/30 section-padding">
         <div className="max-w-4xl mx-auto px-6 text-center">
-          <p className="text-xl md:text-2xl italic text-muted-foreground mb-10 leading-relaxed">
-            "Our mission is simple — make cloud deployment as easy as saving a file."
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-6">Our Mission</p>
+          <p className="text-xl md:text-2xl italic text-muted-foreground mb-12 leading-relaxed max-w-3xl mx-auto">
+            "Make infrastructure invisible. Let developers focus on building products that change the world."
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {values.map((v) => (
@@ -135,8 +141,32 @@ export default function About() {
         </div>
       </section>
 
-      {/* ═══ VISION / ROADMAP ═══ */}
+      {/* ═══ WHY FINITIX ═══ */}
       <section className="section-padding bg-background">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Why Finitix</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">What sets us apart</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {[
+              { icon: Lightbulb, title: "AI-First Approach", desc: "Every product is built with AI at its core — from stack detection to auto-healing." },
+              { icon: Lock, title: "Enterprise Security", desc: "SOC 2 ready, encrypted credentials, VPC isolation, and zero-trust architecture." },
+              { icon: Globe, title: "Multi-Cloud Native", desc: "Not locked to one provider. Deploy anywhere, manage everywhere." },
+              { icon: Users, title: "Community Driven", desc: "Built in the open with developer feedback at every step." },
+            ].map((item) => (
+              <div key={item.title} className="bg-card border border-border rounded-xl p-5 hover:shadow-card-hover transition-all">
+                <item.icon className="h-5 w-5 text-primary mb-3" />
+                <h3 className="text-sm font-bold text-foreground mb-1.5">{item.title}</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══ ROADMAP ═══ */}
+      <section className="bg-secondary/30 section-padding">
         <div className="max-w-3xl mx-auto px-6">
           <div className="text-center mb-12">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Roadmap</p>
@@ -162,31 +192,21 @@ export default function About() {
         </div>
       </section>
 
-      {/* ═══ TEAM ═══ */}
-      <section className="bg-secondary/30 section-padding">
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold text-foreground mb-3">The team building Cloudsnap</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="bg-card border border-border rounded-xl p-6">
-              <div className="flex items-center gap-4 mb-3">
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">JK</div>
-                <div>
-                  <p className="font-bold text-foreground">Jnaneswar Kandukuri</p>
-                  <p className="text-xs text-muted-foreground">Founder & CEO</p>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground">Full-stack developer turned founder. Building the future of cloud deployment.</p>
-            </div>
-            <div className="border-2 border-dashed border-border rounded-xl p-6 flex flex-col items-center justify-center text-center">
-              <Briefcase className="h-8 w-8 text-muted-foreground/30 mb-3" />
-              <h3 className="font-bold text-foreground mb-1">We're hiring</h3>
-              <p className="text-sm text-muted-foreground mb-4">Join us in building the future of cloud deployment.</p>
-              <Button variant="outline" size="sm">
-                Join Us <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+      {/* ═══ HIRING ═══ */}
+      <section className="section-padding bg-background">
+        <div className="max-w-3xl mx-auto px-6 text-center">
+          <div className="border-2 border-dashed border-border rounded-2xl p-10">
+            <Briefcase className="h-10 w-10 text-primary/30 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-foreground mb-3">We're hiring</h2>
+            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+              Finitix is growing. We're looking for passionate developers, designers, and DevOps engineers 
+              who want to shape the future of cloud infrastructure.
+            </p>
+            <Link to="/contact">
+              <Button variant="outline" size="lg" className="h-11 px-8 text-sm font-semibold">
+                View Open Positions <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
               </Button>
-            </div>
+            </Link>
           </div>
         </div>
       </section>
@@ -196,7 +216,7 @@ export default function About() {
         <div className="max-w-3xl mx-auto px-6 text-center">
           <Rocket className="h-10 w-10 text-primary mx-auto mb-4" />
           <h2 className="text-3xl font-bold text-foreground mb-4">Ready to simplify deployment?</h2>
-          <p className="text-muted-foreground mb-8 text-lg">Join hundreds of developers who ship faster.</p>
+          <p className="text-muted-foreground mb-8 text-lg">Try Cloudsnap Studio — built by Finitix for developers everywhere.</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link to="/auth">
               <Button size="lg" className="h-12 px-8 font-semibold">
