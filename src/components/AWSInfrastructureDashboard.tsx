@@ -36,7 +36,7 @@ const STATUS_STYLES: Record<string, string> = {
   deleted: "bg-muted text-muted-foreground",
 };
 
-export default function AWSInfrastructureDashboard({ projectId, awsConnectionId }: Props) {
+export default function AWSInfrastructureDashboard({ projectId, awsConnectionId, projectType, databaseEngine }: Props) {
   const [infrastructure, setInfrastructure] = useState<any>(null);
   const [resources, setResources] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
