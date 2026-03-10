@@ -195,8 +195,26 @@ function generateUserData(config: {
     ? Object.entries(config.envVars).map(([k, v]) => `export ${k}="${v}"`).join("\n")
     : "";
 
-  // Use actual output dir from project config, default to "dist"
   const outputDir = config.outputDir || "dist";
+  const containerName = config.projectName.replace(/[^a-zA-Z0-9-]/g, "-").substring(0, 50);
+
+  // Nginx config with health check endpoint
+  const nginxConf = `server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /health {
+        access_log off;
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+
+    location / {
+        try_files \\$uri \\$uri/ /index.html;
+    }
+}`;
 
   const dockerfileContent = config.projectType === "frontend"
     ? `FROM node:18-alpine AS build
@@ -204,6 +222,7 @@ WORKDIR /app
 COPY . .
 RUN npm install && ${config.buildCommand || "npm run build"}
 FROM nginx:alpine
+RUN rm /etc/nginx/conf.d/default.conf
 COPY --from=build /app/${outputDir} /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]`
@@ -213,7 +232,10 @@ COPY . .
 RUN ${config.buildCommand || "npm install"}
 ENV PORT=${config.port}
 EXPOSE ${config.port}
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -qO- http://localhost:${config.port}/health || exit 1
 CMD ${JSON.stringify((config.startCommand || "npm start").split(" "))}`;
+
+  const hostPort = config.projectType === "frontend" ? "80:80" : `80:${config.port}`;
 
   return btoa(`#!/bin/bash
 set -e
@@ -225,13 +247,20 @@ date
 # Install Docker (compatible with Amazon Linux 2 and 2023)
 if command -v dnf &> /dev/null; then
   dnf update -y
-  dnf install -y docker git
+  dnf install -y docker git curl
 else
   yum update -y
-  yum install -y docker git
+  yum install -y docker git curl
 fi
 systemctl start docker
 systemctl enable docker
+
+# Disable firewall if present (iptables managed by security groups)
+if command -v ufw &> /dev/null; then
+  ufw allow 80/tcp || true
+  ufw allow 443/tcp || true
+  ufw allow 22/tcp || true
+fi
 
 echo "=== Docker installed ==="
 
@@ -241,10 +270,23 @@ cd /app
 
 echo "=== Project cloned ==="
 
+# Write custom nginx config for frontend apps
+${config.projectType === "frontend" ? `
+mkdir -p /app/nginx
+cat > /app/nginx/default.conf << 'NGINXCONF'
+${nginxConf}
+NGINXCONF
+` : ""}
+
 # Create Dockerfile
 cat > Dockerfile << 'DOCKERFILE'
 ${dockerfileContent}
 DOCKERFILE
+
+${config.projectType === "frontend" ? `
+# Add nginx config copy to Dockerfile
+sed -i '/EXPOSE 80/i COPY nginx/default.conf /etc/nginx/conf.d/default.conf' Dockerfile
+` : ""}
 
 # Set environment variables
 ${envExports}
@@ -252,9 +294,29 @@ export PORT=${config.port}
 
 # Build and run
 echo "=== Building Docker image ==="
-docker build -t ${config.projectName} . 2>&1
+docker build -t ${containerName} . 2>&1
 echo "=== Starting container ==="
-docker run -d --restart always -p ${config.projectType === "frontend" ? "80:80" : `${config.port}:${config.port}`} --name ${config.projectName} ${config.projectName}
+docker run -d --restart always -p ${hostPort} --name ${containerName} ${containerName}
+
+# Wait for container to be healthy
+echo "=== Waiting for application to start ==="
+for i in $(seq 1 30); do
+  if curl -sf http://localhost:80/health > /dev/null 2>&1 || curl -sf http://localhost:80/ > /dev/null 2>&1; then
+    echo "=== Application is responding on port 80 ==="
+    break
+  fi
+  echo "Waiting for app... attempt $i/30"
+  sleep 5
+done
+
+# Final status
+if docker ps | grep -q ${containerName}; then
+  echo "=== Container is running ==="
+  docker ps
+else
+  echo "=== ERROR: Container failed to start ==="
+  docker logs ${containerName} 2>&1 || true
+fi
 
 echo "=== Deployment complete! ==="
 date
