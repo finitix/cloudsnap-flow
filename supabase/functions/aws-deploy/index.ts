@@ -600,7 +600,7 @@ serve(async (req) => {
           resource_id: instanceId,
           status: "running",
           config: { instanceType: FREE_TIER.ec2InstanceType, amiId, port },
-          monthly_cost_estimate: COST_ESTIMATES.ec2_t2_micro,
+          monthly_cost_estimate: COST_ESTIMATES.ec2_t3_micro,
         });
 
         // Wait for public IP assignment with retries
