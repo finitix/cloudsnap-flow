@@ -702,10 +702,11 @@ Deno.serve(async (req) => {
           await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: liveUrl }).eq("infrastructure_id", infra.id).eq("resource_type", "ec2");
 
           if (deploymentId) {
-            await supabase.from("deployments").update({ status: "live", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
+            // Set to VERIFYING — not LIVE yet; the client or verify action will confirm
+            await supabase.from("deployments").update({ status: "deploying", live_url: liveUrl, deploy_id: instanceId }).eq("id", deploymentId);
           }
         } else if (deploymentId) {
-          await supabase.from("deployments").update({ status: "live", deploy_id: instanceId, error_message: "Public IP not yet assigned — check back in a few minutes" }).eq("id", deploymentId);
+          await supabase.from("deployments").update({ status: "deploying", deploy_id: instanceId, error_message: "Public IP not yet assigned — check back in a few minutes" }).eq("id", deploymentId);
         }
 
         await supabase.from("aws_infrastructure").update({ status: "creating_resources" }).eq("id", infra.id);
