@@ -10,15 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Upload, Github, FolderGit2, Cloud, Server, Globe, Database, MapPin } from "lucide-react";
+import { Plus, Upload, Github, FolderGit2, Cloud, Server, Globe, Database, MapPin, Loader2, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-
-const APP_TYPES = [
-  { id: "frontend", name: "Frontend", icon: Globe, description: "React, Vue, Angular, Static sites" },
-  { id: "backend", name: "Backend", icon: Server, description: "Node.js, Python, Java APIs" },
-  { id: "fullstack", name: "Full Stack", icon: FolderGit2, description: "Frontend + Backend" },
-];
 
 const DB_OPTIONS = [
   { id: "none", name: "No Database" },
@@ -41,13 +35,17 @@ export default function Projects() {
   const [githubUrl, setGithubUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [appType, setAppType] = useState("frontend");
   const [databaseEngine, setDatabaseEngine] = useState("none");
   const [awsRegion, setAwsRegion] = useState("us-east-1");
   const [awsConnections, setAwsConnections] = useState<any[]>([]);
   const [selectedAwsConn, setSelectedAwsConn] = useState("");
   const [deployTarget, setDeployTarget] = useState<"cloud" | "aws">("cloud");
   const navigate = useNavigate();
+
+  // Auto-detection state
+  const [detecting, setDetecting] = useState(false);
+  const [detectedType, setDetectedType] = useState<string | null>(null);
+  const [detectedFramework, setDetectedFramework] = useState<string | null>(null);
 
   const load = async () => {
     if (!user) return;
@@ -61,6 +59,44 @@ export default function Projects() {
   };
 
   useEffect(() => { load(); }, [user]);
+
+  // Auto-detect project type when GitHub URL changes
+  useEffect(() => {
+    const url = githubUrl.trim();
+    if (!url || !url.includes("github.com/")) {
+      setDetectedType(null);
+      setDetectedFramework(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setDetecting(true);
+      setDetectedType(null);
+      setDetectedFramework(null);
+      try {
+        // Use the deploy-project analyze endpoint to detect project type
+        // First create a temporary project, analyze, then we'll use the results
+        const { data } = await supabase.functions.invoke("deploy-project", {
+          body: { action: "quick-analyze", githubUrl: url },
+        });
+        if (data?.success) {
+          setDetectedType(data.projectType || "frontend");
+          setDetectedFramework(data.framework || null);
+          // Auto-set name from repo if empty
+          if (!name) {
+            const repoName = url.split("/").pop()?.replace(".git", "") || "";
+            setName(repoName);
+          }
+        }
+      } catch {
+        // Silently fail — user can still create project
+      } finally {
+        setDetecting(false);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [githubUrl]);
 
   const createProject = async (sourceType: "zip" | "github") => {
     if (!name) { toast.error("Project name required"); return; }
@@ -77,7 +113,7 @@ export default function Projects() {
         name,
         source_type: sourceType,
         github_url: sourceType === "github" ? githubUrl : null,
-        project_type: appType,
+        project_type: detectedType || "frontend",
         status: "analyzing",
       };
 
@@ -91,7 +127,8 @@ export default function Projects() {
       if (error) throw error;
       toast.success("Project created! Analyzing...");
       setOpen(false);
-      setName(""); setGithubUrl(""); setFile(null); setAppType("frontend"); setDatabaseEngine("none");
+      setName(""); setGithubUrl(""); setFile(null); setDatabaseEngine("none");
+      setDetectedType(null); setDetectedFramework(null);
 
       // Trigger analysis
       const { data: analysisData } = await supabase.functions.invoke("deploy-project", {
@@ -104,7 +141,7 @@ export default function Projects() {
       } else {
         setTimeout(async () => {
           await supabase.from("projects").update({
-            framework: appType === "frontend" ? "React" : "Node.js",
+            framework: detectedFramework || "React",
             build_command: "npm run build",
             output_dir: "dist",
             status: "ready",
@@ -120,6 +157,18 @@ export default function Projects() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const typeIcon = (type: string | null) => {
+    if (type === "backend") return <Server className="h-4 w-4" />;
+    if (type === "fullstack") return <FolderGit2 className="h-4 w-4" />;
+    return <Globe className="h-4 w-4" />;
+  };
+
+  const typeLabel = (type: string | null) => {
+    if (type === "backend") return "Backend";
+    if (type === "fullstack") return "Full Stack";
+    return "Frontend";
   };
 
   return (
@@ -165,23 +214,6 @@ export default function Projects() {
                         {awsConnections.length === 0 ? "Connect AWS first" : "EC2, RDS, VPC"}
                       </p>
                     </button>
-                  </div>
-                </div>
-
-                {/* Application Type */}
-                <div className="space-y-2">
-                  <Label>Application Type</Label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {APP_TYPES.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setAppType(t.id)}
-                        className={`p-3 rounded-lg border text-center transition-all ${appType === t.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"}`}
-                      >
-                        <t.icon className={`h-5 w-5 mx-auto mb-1 ${appType === t.id ? "text-primary" : "text-muted-foreground"}`} />
-                        <p className="text-xs font-medium">{t.name}</p>
-                      </button>
-                    ))}
                   </div>
                 </div>
 
@@ -249,7 +281,36 @@ export default function Projects() {
                       <Label>GitHub Repository URL</Label>
                       <Input value={githubUrl} onChange={(e) => setGithubUrl(e.target.value)} placeholder="https://github.com/user/repo" />
                     </div>
-                    <Button onClick={() => createProject("github")} disabled={loading || !name} className="w-full">
+
+                    {/* Auto-detected type indicator */}
+                    {githubUrl && githubUrl.includes("github.com/") && (
+                      <div className={`rounded-lg border p-3 transition-all ${detectedType ? "border-primary/50 bg-primary/5" : "border-border bg-muted/30"}`}>
+                        <div className="flex items-center gap-2">
+                          {detecting ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              <span className="text-sm text-muted-foreground">Analyzing repository...</span>
+                            </>
+                          ) : detectedType ? (
+                            <>
+                              <CheckCircle className="h-4 w-4 text-primary" />
+                              <div className="flex items-center gap-2">
+                                {typeIcon(detectedType)}
+                                <span className="text-sm font-medium">{typeLabel(detectedType)}</span>
+                                {detectedFramework && (
+                                  <Badge variant="outline" className="text-[10px]">{detectedFramework}</Badge>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground ml-auto">Auto-detected</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">Enter a GitHub URL to auto-detect project type</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <Button onClick={() => createProject("github")} disabled={loading || !name || detecting} className="w-full">
                       {loading ? "Creating..." : "Import from GitHub"}
                     </Button>
                   </TabsContent>
