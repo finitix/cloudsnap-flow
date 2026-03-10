@@ -331,7 +331,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { action, ...params } = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+    const { action, ...params } = body;
     const supabase = getSupabaseAdmin();
 
     // Auth check
@@ -339,13 +345,20 @@ Deno.serve(async (req) => {
     let userId: string | null = null;
     if (authHeader) {
       const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_ANON_KEY")!,
-      ).auth.getUser(token);
-      userId = user?.id || null;
+      try {
+        const { data: { user } } = await createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_ANON_KEY")!,
+        ).auth.getUser(token);
+        userId = user?.id || null;
+      } catch (authErr: any) {
+        console.error("Auth error:", authErr.message);
+        return json({ error: "Authentication failed. Please sign in again.", details: authErr.message }, 401);
+      }
     }
-    if (!userId) return json({ error: "Unauthorized" }, 401);
+    if (!userId) return json({ error: "Unauthorized. Please sign in again." }, 401);
+
+    console.log(`[aws-deploy] action=${action} userId=${userId}`);
 
     // ── Validate AWS Connection ──
     if (action === "validate-aws") {
