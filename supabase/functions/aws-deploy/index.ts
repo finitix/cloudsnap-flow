@@ -1035,6 +1035,181 @@ Deno.serve(async (req) => {
       return json({ success: true, stopped: stoppedCount });
     }
 
+    // ── Diagnose Instance (auto-fix security groups, check connectivity) ──
+    if (action === "diagnose-instance") {
+      const { awsConnectionId, instanceId, infrastructureId } = params;
+      const { data: awsConn } = await supabase.from("aws_connections").select("*").eq("id", awsConnectionId).eq("user_id", userId).single();
+      if (!awsConn) return json({ success: false, error: "AWS connection not found" });
+
+      const creds: AwsCreds = { accessKeyId: awsConn.access_key_id, secretAccessKey: awsConn.secret_access_key, region: awsConn.default_region };
+      const diagnostics: string[] = [];
+      const fixes: string[] = [];
+
+      // 1. Check instance state
+      const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
+      const instanceState = extractTag(descRes.rawText, "name"); // instance state name
+      const publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress");
+      const publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName");
+      diagnostics.push(`Instance state: ${instanceState || "unknown"}`);
+      diagnostics.push(`Public IP: ${publicIp || "none"}`);
+      diagnostics.push(`Public DNS: ${publicDns || "none"}`);
+
+      // If instance is stopped, start it
+      if (instanceState === "stopped") {
+        await ec2Action(creds, "StartInstances", { "InstanceId.1": instanceId });
+        await supabase.from("aws_resources").update({ status: "running" }).eq("resource_id", instanceId);
+        fixes.push("Instance was stopped — started it");
+        diagnostics.push("Instance started, wait 2-3 minutes for boot");
+      }
+
+      // 2. Check security group rules
+      // Find the security group(s) for this instance
+      const sgMatches = descRes.rawText.match(/<groupId>(sg-[a-f0-9]+)<\/groupId>/g) || [];
+      const sgIds = sgMatches.map(m => m.replace(/<\/?groupId>/g, ""));
+      diagnostics.push(`Security groups: ${sgIds.join(", ") || "none"}`);
+
+      for (const sgId of sgIds) {
+        const sgDescRes = await ec2Action(creds, "DescribeSecurityGroups", { "GroupId.1": sgId });
+        const sgText = sgDescRes.rawText;
+
+        // Check for port 80
+        const hasPort80 = sgText.includes("<fromPort>80</fromPort>");
+        const hasPort443 = sgText.includes("<fromPort>443</fromPort>");
+        const hasPort22 = sgText.includes("<fromPort>22</fromPort>");
+
+        diagnostics.push(`SG ${sgId}: HTTP(80)=${hasPort80}, HTTPS(443)=${hasPort443}, SSH(22)=${hasPort22}`);
+
+        // Auto-fix missing rules
+        if (!hasPort80) {
+          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+            GroupId: sgId, IpProtocol: "tcp", FromPort: "80", ToPort: "80", CidrIp: "0.0.0.0/0",
+          });
+          fixes.push(`Added HTTP (port 80) rule to ${sgId}`);
+        }
+        if (!hasPort443) {
+          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+            GroupId: sgId, IpProtocol: "tcp", FromPort: "443", ToPort: "443", CidrIp: "0.0.0.0/0",
+          });
+          fixes.push(`Added HTTPS (port 443) rule to ${sgId}`);
+        }
+        if (!hasPort22) {
+          await ec2Action(creds, "AuthorizeSecurityGroupIngress", {
+            GroupId: sgId, IpProtocol: "tcp", FromPort: "22", ToPort: "22", CidrIp: "0.0.0.0/0",
+          });
+          fixes.push(`Added SSH (port 22) rule to ${sgId}`);
+        }
+      }
+
+      // 3. Check VPC routing (internet gateway)
+      if (infrastructureId) {
+        const { data: infra } = await supabase.from("aws_infrastructure").select("*").eq("id", infrastructureId).single();
+        if (infra) {
+          diagnostics.push(`VPC: ${infra.vpc_id || "none"}`);
+          diagnostics.push(`Internet Gateway: ${infra.internet_gateway_id || "none"}`);
+          diagnostics.push(`Public Subnet: ${infra.public_subnet_id || "none"}`);
+
+          // Check if IGW exists
+          if (!infra.internet_gateway_id && infra.vpc_id) {
+            const igwRes = await ec2Action(creds, "CreateInternetGateway", {});
+            const newIgwId = extractTag(igwRes.rawText, "internetGatewayId");
+            if (newIgwId) {
+              await ec2Action(creds, "AttachInternetGateway", { InternetGatewayId: newIgwId, VpcId: infra.vpc_id });
+              await supabase.from("aws_infrastructure").update({ internet_gateway_id: newIgwId }).eq("id", infrastructureId);
+              fixes.push(`Created and attached Internet Gateway: ${newIgwId}`);
+            }
+          }
+        }
+      }
+
+      // 4. Get console output for app diagnostics
+      const logRes = await ec2Action(creds, "GetConsoleOutput", { InstanceId: instanceId });
+      const outputB64 = extractTag(logRes.rawText, "output");
+      let appStatus = "unknown";
+      if (outputB64) {
+        try {
+          const decoded = atob(outputB64);
+          if (decoded.includes("Deployment complete")) appStatus = "deployment_complete";
+          else if (decoded.includes("Building Docker image")) appStatus = "building";
+          else if (decoded.includes("Docker installed")) appStatus = "docker_ready";
+          else if (decoded.includes("ERROR: Container failed")) appStatus = "container_failed";
+          else if (decoded.includes("Application is responding")) appStatus = "app_responding";
+
+          // Get last 20 meaningful lines
+          const logLines = decoded.split("\n").filter((l: string) => l.trim()).slice(-20);
+          diagnostics.push(`App boot status: ${appStatus}`);
+          diagnostics.push(`Last log lines: ${logLines.join(" | ").substring(0, 500)}`);
+        } catch { diagnostics.push("Could not decode console output"); }
+      } else {
+        diagnostics.push("Console output not yet available (instance may still be booting)");
+      }
+
+      // Update public URL if we found IP
+      if (publicIp || publicDns) {
+        const liveUrl = `http://${publicDns || publicIp}`;
+        await supabase.from("aws_resources").update({ public_ip: publicIp || null, public_url: liveUrl }).eq("resource_id", instanceId);
+      }
+
+      return json({
+        success: true,
+        diagnostics,
+        fixes,
+        instanceState: instanceState || "unknown",
+        publicIp: publicIp || null,
+        publicDns: publicDns || null,
+        appStatus,
+      });
+    }
+
+    // ── Verify Deployment (health check before marking LIVE) ──
+    if (action === "verify-deployment") {
+      const { awsConnectionId, instanceId, deploymentId: depId } = params;
+      const { data: awsConn } = await supabase.from("aws_connections").select("*").eq("id", awsConnectionId).eq("user_id", userId).single();
+      if (!awsConn) return json({ success: false, error: "AWS connection not found" });
+
+      const creds: AwsCreds = { accessKeyId: awsConn.access_key_id, secretAccessKey: awsConn.secret_access_key, region: awsConn.default_region };
+
+      // Get instance info
+      const descRes = await ec2Action(creds, "DescribeInstances", { "InstanceId.1": instanceId });
+      const publicIp = extractTag(descRes.rawText, "publicIpAddress") || extractTag(descRes.rawText, "ipAddress");
+      const publicDns = extractTag(descRes.rawText, "publicDnsName") || extractTag(descRes.rawText, "dnsName");
+
+      if (!publicIp && !publicDns) {
+        return json({ success: false, status: "no_ip", message: "Instance has no public IP yet" });
+      }
+
+      const url = `http://${publicDns || publicIp}`;
+
+      // Try to reach the app
+      let reachable = false;
+      let healthOk = false;
+      try {
+        const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(10000) });
+        healthOk = res.ok;
+        reachable = true;
+      } catch {
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+          reachable = res.ok || res.status < 500;
+        } catch { reachable = false; }
+      }
+
+      if (reachable) {
+        // Mark as LIVE
+        await supabase.from("aws_resources").update({ public_ip: publicIp, public_url: url, status: "running" }).eq("resource_id", instanceId);
+        if (depId) {
+          await supabase.from("deployments").update({ status: "live", live_url: url }).eq("id", depId);
+        }
+        return json({ success: true, status: "live", url, healthCheck: healthOk });
+      }
+
+      return json({
+        success: false,
+        status: "unreachable",
+        url,
+        message: "Application is not responding yet. It may still be building. Try again in a few minutes or run diagnostics.",
+      });
+    }
+
     return json({ error: "Unknown action: " + action }, 400);
   } catch (err: any) {
     return json({ error: err.message || "Internal error" }, 500);
