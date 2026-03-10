@@ -711,7 +711,7 @@ serve(async (req) => {
         }
 
         // Calculate cost estimate
-        let totalCost = COST_ESTIMATES.ec2_t2_micro;
+        let totalCost = COST_ESTIMATES.ec2_t3_micro;
         if (databaseEngine && databaseEngine !== "none") totalCost += COST_ESTIMATES.rds_db_t3_micro;
 
         await supabase.from("aws_infrastructure").update({
