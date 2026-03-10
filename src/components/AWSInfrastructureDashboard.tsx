@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Cloud, Server, Database, Globe, Shield, Loader2, Play, Square, Trash2,
-  CheckCircle, AlertTriangle, Clock, Activity, DollarSign, HardDrive
+  CheckCircle, AlertTriangle, Activity, DollarSign, HardDrive, Stethoscope, RefreshCw
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -30,7 +30,10 @@ const RESOURCE_ICONS: Record<string, any> = {
 const STATUS_STYLES: Record<string, string> = {
   active: "bg-green-500/15 text-green-400",
   running: "bg-green-500/15 text-green-400",
+  live: "bg-green-500/15 text-green-400",
   creating: "bg-amber-500/15 text-amber-400",
+  deploying: "bg-amber-500/15 text-amber-400",
+  verifying: "bg-blue-500/15 text-blue-400",
   stopped: "bg-muted text-muted-foreground",
   error: "bg-red-500/15 text-red-400",
   deleted: "bg-muted text-muted-foreground",
@@ -44,6 +47,8 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnosticResults, setDiagnosticResults] = useState<any>(null);
 
   const loadInfra = async () => {
     setLoading(true);
@@ -61,7 +66,6 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
 
   useEffect(() => { loadInfra(); }, [projectId]);
 
-  // Realtime updates
   useEffect(() => {
     if (!infrastructure?.id) return;
     const channel = supabase
@@ -72,12 +76,12 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
     return () => { supabase.removeChannel(channel); };
   }, [infrastructure?.id]);
 
-  const handleDeploy = async (appType: string, databaseEngine: string) => {
+  const handleDeploy = async (appType: string, dbEngine: string) => {
     if (!awsConnectionId) { toast.error("No AWS connection found"); return; }
     setDeploying(true);
     try {
       const { data, error } = await supabase.functions.invoke("aws-deploy", {
-        body: { action: "deploy-aws", projectId, awsConnectionId, appType, databaseEngine },
+        body: { action: "deploy-aws", projectId, awsConnectionId, appType, databaseEngine: dbEngine },
       });
       if (error) throw error;
       if (data?.success) {
@@ -102,6 +106,46 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
         loadInfra();
       } else {
         toast.error(data?.error || "Action failed");
+      }
+    } catch (err: any) { toast.error(err.message); }
+    finally { setActionLoading(null); }
+  };
+
+  const handleDiagnose = async (instanceId: string) => {
+    if (!awsConnectionId) return;
+    setDiagnosing(true);
+    setDiagnosticResults(null);
+    try {
+      const { data } = await supabase.functions.invoke("aws-deploy", {
+        body: { action: "diagnose-instance", awsConnectionId, instanceId, infrastructureId: infrastructure?.id },
+      });
+      if (data?.success) {
+        setDiagnosticResults(data);
+        if (data.fixes?.length > 0) {
+          toast.success(`Applied ${data.fixes.length} fix(es). Refresh in a moment.`);
+        } else {
+          toast.info("Diagnostics complete — no issues found with security groups or networking.");
+        }
+        loadInfra();
+      } else {
+        toast.error(data?.error || "Diagnostics failed");
+      }
+    } catch (err: any) { toast.error(err.message); }
+    finally { setDiagnosing(false); }
+  };
+
+  const handleVerify = async (instanceId: string, deploymentId?: string) => {
+    if (!awsConnectionId) return;
+    setActionLoading("verify-" + instanceId);
+    try {
+      const { data } = await supabase.functions.invoke("aws-deploy", {
+        body: { action: "verify-deployment", awsConnectionId, instanceId, deploymentId },
+      });
+      if (data?.success && data?.status === "live") {
+        toast.success("Application is live and responding!");
+        loadInfra();
+      } else {
+        toast.warning(data?.message || "Application not responding yet. Try diagnostics.");
       }
     } catch (err: any) { toast.error(err.message); }
     finally { setActionLoading(null); }
@@ -133,7 +177,6 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
     );
   }
 
-  // No infrastructure yet — show deploy button
   if (!infrastructure || infrastructure.status === "deleted") {
     const appType = projectType || "frontend";
     const dbEngine = databaseEngine || "none";
@@ -177,12 +220,12 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge className={`text-[10px] ${STATUS_STYLES[infrastructure.status] || "bg-muted text-muted-foreground"}`}>
+            <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[infrastructure.status] || "bg-muted text-muted-foreground"}`}>
               {isCreating && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
               {infrastructure.status}
             </Badge>
             <Button variant="outline" size="sm" onClick={loadInfra}>
-              <Activity className="h-3.5 w-3.5 mr-1.5" /> Refresh
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Refresh
             </Button>
             <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setShowDeleteDialog(true)}>
               <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
@@ -198,7 +241,7 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
             <span className="text-sm font-semibold text-green-400">${infrastructure.estimated_monthly_cost?.toFixed(2) || "0.00"}</span>
           </div>
           {infrastructure.estimated_monthly_cost === 0 && (
-            <Badge className="bg-green-500/15 text-green-400 text-[10px]">
+            <Badge variant="outline" className="bg-green-500/15 text-green-400 text-[10px]">
               <CheckCircle className="h-3 w-3 mr-1" /> Free Tier
             </Badge>
           )}
@@ -213,7 +256,7 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
             <div className="flex items-center gap-2 mb-3">
               <Shield className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold">VPC</span>
-              <Badge className="bg-green-500/15 text-green-400 text-[10px] ml-auto">Active</Badge>
+              <Badge variant="outline" className="bg-green-500/15 text-green-400 text-[10px] ml-auto">Active</Badge>
             </div>
             <div className="space-y-1.5 text-xs">
               <div className="flex justify-between"><span className="text-muted-foreground">VPC ID</span><span className="font-mono">{infrastructure.vpc_id}</span></div>
@@ -232,7 +275,7 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
               <div className="flex items-center gap-2 mb-3">
                 <Icon className="h-4 w-4 text-primary" />
                 <span className="text-sm font-semibold uppercase">{r.resource_type}</span>
-                <Badge className={`text-[10px] ml-auto ${STATUS_STYLES[r.status] || "bg-muted text-muted-foreground"}`}>
+                <Badge variant="outline" className={`text-[10px] ml-auto ${STATUS_STYLES[r.status] || "bg-muted text-muted-foreground"}`}>
                   {r.status === "creating" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
                   {r.status}
                 </Badge>
@@ -260,7 +303,7 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
 
               {/* EC2 Actions */}
               {r.resource_type === "ec2" && r.resource_id && (
-                <div className="flex gap-2 mt-3 pt-3 border-t border-border">
+                <div className="flex gap-2 mt-3 pt-3 border-t border-border flex-wrap">
                   {r.status === "running" ? (
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => handleStopStart(r.resource_id, "stop")} disabled={actionLoading === r.resource_id}>
                       {actionLoading === r.resource_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Square className="h-3 w-3 mr-1" /> Stop</>}
@@ -270,12 +313,47 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
                       {actionLoading === r.resource_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Play className="h-3 w-3 mr-1" /> Start</>}
                     </Button>
                   ) : null}
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleDiagnose(r.resource_id)} disabled={diagnosing}>
+                    {diagnosing ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Stethoscope className="h-3 w-3 mr-1" /> Diagnose</>}
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleVerify(r.resource_id)} disabled={actionLoading === "verify-" + r.resource_id}>
+                    {actionLoading === "verify-" + r.resource_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <><CheckCircle className="h-3 w-3 mr-1" /> Verify</>}
+                  </Button>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {/* Diagnostic Results */}
+      {diagnosticResults && (
+        <div className="glass-card rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Stethoscope className="h-4 w-4 text-primary" />
+            <h4 className="text-sm font-semibold">Diagnostic Results</h4>
+            <Badge variant="outline" className={`text-[10px] ml-auto ${diagnosticResults.fixes?.length > 0 ? "bg-amber-500/15 text-amber-400" : "bg-green-500/15 text-green-400"}`}>
+              {diagnosticResults.fixes?.length > 0 ? `${diagnosticResults.fixes.length} fix(es) applied` : "All OK"}
+            </Badge>
+          </div>
+          {diagnosticResults.fixes?.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-amber-400">Fixes Applied:</p>
+              {diagnosticResults.fixes.map((fix: string, i: number) => (
+                <div key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                  <CheckCircle className="h-3 w-3 text-green-400 mt-0.5 shrink-0" />
+                  {fix}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="bg-muted/30 rounded-lg p-3 max-h-[200px] overflow-y-auto font-mono text-[10px] space-y-0.5">
+            {diagnosticResults.diagnostics?.map((line: string, i: number) => (
+              <div key={i} className="text-muted-foreground">{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Error display */}
       {infrastructure.error_message && (
