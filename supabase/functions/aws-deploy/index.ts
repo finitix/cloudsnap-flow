@@ -185,6 +185,7 @@ function generateUserData(config: {
   githubUrl?: string;
   buildCommand: string;
   startCommand: string;
+  outputDir: string;
   port: number;
   envVars?: Record<string, string>;
   framework: string;
@@ -194,20 +195,23 @@ function generateUserData(config: {
     ? Object.entries(config.envVars).map(([k, v]) => `export ${k}="${v}"`).join("\n")
     : "";
 
+  // Use actual output dir from project config, default to "dist"
+  const outputDir = config.outputDir || "dist";
+
   const dockerfileContent = config.projectType === "frontend"
     ? `FROM node:18-alpine AS build
 WORKDIR /app
 COPY . .
 RUN npm install && ${config.buildCommand || "npm run build"}
 FROM nginx:alpine
-COPY --from=build /app/${config.framework?.includes("React") ? "build" : "dist"} /usr/share/nginx/html
+COPY --from=build /app/${outputDir} /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]`
     : `FROM node:18-alpine
 WORKDIR /app
 COPY . .
 RUN ${config.buildCommand || "npm install"}
-${envExports ? `ENV PORT=${config.port}` : ""}
+ENV PORT=${config.port}
 EXPOSE ${config.port}
 CMD ${JSON.stringify((config.startCommand || "npm start").split(" "))}`;
 
@@ -215,15 +219,27 @@ CMD ${JSON.stringify((config.startCommand || "npm start").split(" "))}`;
 set -e
 exec > /var/log/user-data.log 2>&1
 
-# Install Docker
-yum update -y
-yum install -y docker git
+echo "=== CloudSnap Deployment Started ==="
+date
+
+# Install Docker (compatible with Amazon Linux 2 and 2023)
+if command -v dnf &> /dev/null; then
+  dnf update -y
+  dnf install -y docker git
+else
+  yum update -y
+  yum install -y docker git
+fi
 systemctl start docker
 systemctl enable docker
+
+echo "=== Docker installed ==="
 
 # Clone project
 ${config.githubUrl ? `git clone ${config.githubUrl} /app` : "mkdir -p /app"}
 cd /app
+
+echo "=== Project cloned ==="
 
 # Create Dockerfile
 cat > Dockerfile << 'DOCKERFILE'
@@ -235,10 +251,13 @@ ${envExports}
 export PORT=${config.port}
 
 # Build and run
-docker build -t ${config.projectName} .
+echo "=== Building Docker image ==="
+docker build -t ${config.projectName} . 2>&1
+echo "=== Starting container ==="
 docker run -d --restart always -p ${config.projectType === "frontend" ? "80:80" : `${config.port}:${config.port}`} --name ${config.projectName} ${config.projectName}
 
-echo "Deployment complete!"
+echo "=== Deployment complete! ==="
+date
 `);
 }
 
@@ -543,15 +562,17 @@ Deno.serve(async (req) => {
         await supabase.from("aws_infrastructure").update({ security_group_id: sgId, status: "launching_compute" }).eq("id", infra.id);
 
         // ── Step 5: Launch EC2 Instance ──
-        // Get latest Amazon Linux 2 AMI
+        // Get latest Amazon Linux 2023 AMI (free tier eligible with t3.micro)
         const amiRes = await ec2Action(creds, "DescribeImages", {
           "Owner.1": "amazon",
           "Filter.1.Name": "name",
-          "Filter.1.Value.1": "amzn2-ami-hvm-*-x86_64-gp2",
+          "Filter.1.Value.1": "al2023-ami-2023.*-x86_64",
           "Filter.2.Name": "state",
           "Filter.2.Value.1": "available",
+          "Filter.3.Name": "architecture",
+          "Filter.3.Value.1": "x86_64",
         });
-        let amiId = "ami-0c02fb55956c7d316"; // fallback
+        let amiId = "ami-0c02fb55956c7d316"; // fallback Amazon Linux 2
         const amiMatches = amiRes.rawText.match(/<imageId>(ami-[a-f0-9]+)<\/imageId>/g);
         if (amiMatches && amiMatches.length > 0) {
           amiId = amiMatches[0].replace(/<\/?imageId>/g, "");
@@ -563,6 +584,7 @@ Deno.serve(async (req) => {
           githubUrl: project.github_url || undefined,
           buildCommand: project.build_command || "npm run build",
           startCommand: project.backend_start_command || "npm start",
+          outputDir: project.frontend_output_dir || project.output_dir || "dist",
           port,
           framework: project.framework || "",
           projectType: appType || project.project_type || "frontend",

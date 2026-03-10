@@ -79,7 +79,7 @@ export default function AWSMonitoringDashboard({ projectId, awsConnectionId, ins
           </Button>
         </div>
       ) : (
-        <Tabs defaultValue="cpu">
+        <Tabs defaultValue="cpu" onValueChange={(v) => { if (v === "logs" && logs.length === 0 && !logsLoading) fetchLogs(); if (v === "cpu" && !metrics && !loading) fetchMetrics(); }}>
           <TabsList className="w-full justify-start">
             <TabsTrigger value="cpu"><Cpu className="h-3.5 w-3.5 mr-1.5" />CPU</TabsTrigger>
             <TabsTrigger value="network"><HardDrive className="h-3.5 w-3.5 mr-1.5" />Network</TabsTrigger>
