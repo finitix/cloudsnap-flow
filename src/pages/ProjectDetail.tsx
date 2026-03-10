@@ -202,22 +202,32 @@ export default function ProjectDetail() {
     try {
       const dep = deployments.find(d => d.id === depId);
       if (dep?.provider === "aws") {
-        // For AWS deployments, run diagnose + verify instead of redeploy
+        // For AWS: verify + diagnose. The edge function resolves creds from instanceId if awsConnectionId is missing.
+        const awsConnId = project?.aws_connection_id || undefined;
+        const instanceId = dep.deploy_id;
+        
+        if (!instanceId) {
+          toast.error("No instance ID found for this deployment.");
+          return;
+        }
+
+        // Try verify first
         const { data, error } = await supabase.functions.invoke("aws-deploy", {
-          body: { action: "verify-deployment", awsConnectionId: project?.aws_connection_id, instanceId: dep.deploy_id, deploymentId: depId },
+          body: { action: "verify-deployment", awsConnectionId: awsConnId, instanceId, deploymentId: depId },
         });
         if (error) throw error;
+        
         if (data?.status === "live") {
           toast.success("Application is live and responding!");
         } else {
-          // Try diagnose
+          // Run full diagnostics
           const { data: diagData } = await supabase.functions.invoke("aws-deploy", {
-            body: { action: "diagnose-instance", awsConnectionId: project?.aws_connection_id, instanceId: dep.deploy_id },
+            body: { action: "diagnose-instance", awsConnectionId: awsConnId, instanceId },
           });
           if (diagData?.fixes?.length > 0) {
-            toast.success(`Applied ${diagData.fixes.length} fix(es). Verifying again in a moment...`);
+            toast.success(`Applied ${diagData.fixes.length} fix(es). Instance may need 3-5 min to boot.`);
           } else {
-            toast.warning("Application not responding yet. The instance may still be booting (takes 3-5 minutes after creation).");
+            toast.warning("Instance is booting. It takes 3-5 minutes after creation for the app to be reachable.");
           }
         }
         fetchDeployments();
