@@ -161,7 +161,7 @@ async function elbAction(creds: AwsCreds, action: string, params: Record<string,
 // ══════════════════════════════════════
 
 const FREE_TIER = {
-  ec2InstanceType: "t2.micro",
+  ec2InstanceType: "t3.micro",
   rdsInstanceClass: "db.t3.micro",
   rdsStorage: 20,
   ebsSize: 10,
@@ -170,7 +170,7 @@ const FREE_TIER = {
 };
 
 const COST_ESTIMATES: Record<string, number> = {
-  ec2_t2_micro: 0, // Free tier
+  ec2_t3_micro: 0, // Free tier
   rds_db_t3_micro: 0, // Free tier (first 12 months)
   alb: 16.2, // ~$16.20/month base
   s3: 0, // Minimal
