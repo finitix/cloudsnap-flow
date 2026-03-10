@@ -1951,6 +1951,33 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
 
+    // ── Quick Analyze (no project creation needed) ──
+    if (action === "quick-analyze") {
+      const { githubUrl: qaGithubUrl } = body;
+      if (!qaGithubUrl || !qaGithubUrl.includes("github.com/")) {
+        return json({ success: false, error: "Invalid GitHub URL" });
+      }
+      try {
+        const zipBuffer = await downloadGitHubRepoZip(qaGithubUrl);
+        const extractedFiles = extractZipFilesRaw(zipBuffer);
+        if (extractedFiles.length === 0) {
+          return json({ success: true, projectType: "frontend", framework: "Unknown" });
+        }
+        const stackAnalysis = detectProjectType(extractedFiles);
+        return json({
+          success: true,
+          projectType: stackAnalysis.deploymentType,
+          framework: stackAnalysis.framework,
+          hasFrontend: stackAnalysis.hasFrontend,
+          hasBackend: stackAnalysis.hasBackend,
+          frontendFramework: stackAnalysis.frontendFramework,
+          backendFramework: stackAnalysis.backendFramework,
+        });
+      } catch (e: any) {
+        return json({ success: false, error: e.message });
+      }
+    }
+
     // ── Analyze project ──
     if (action === "analyze") {
       const { projectId: analyzeProjectId } = body;
