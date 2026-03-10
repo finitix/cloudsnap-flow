@@ -650,7 +650,7 @@ export default function ProjectDetail() {
             <AWSMonitoringDashboard
               projectId={project.id}
               awsConnectionId={project.aws_connection_id}
-              instanceId={deployments.find((d) => d.provider === "aws" && d.status === "live")?.deploy_id || undefined}
+              instanceId={deployments.find((d) => d.provider === "aws" && (d.status === "live" || d.status === "deploying"))?.deploy_id || undefined}
             />
           </>
         )}
