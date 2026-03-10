@@ -582,6 +582,7 @@ Deno.serve(async (req) => {
           githubUrl: project.github_url || undefined,
           buildCommand: project.build_command || "npm run build",
           startCommand: project.backend_start_command || "npm start",
+          outputDir: project.frontend_output_dir || project.output_dir || "dist",
           port,
           framework: project.framework || "",
           projectType: appType || project.project_type || "frontend",
