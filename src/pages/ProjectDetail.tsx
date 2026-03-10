@@ -61,6 +61,7 @@ export default function ProjectDetail() {
   const [alerts, setAlerts] = useState<DeployAlert[]>([]);
   const [triggeringHeal, setTriggeringHeal] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const awsVerifyRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const domainDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchDeployments = useCallback(async () => {
