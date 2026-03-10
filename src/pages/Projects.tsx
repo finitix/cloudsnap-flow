@@ -230,7 +230,7 @@ export default function Projects() {
                     {databaseEngine !== "none" && (
                       <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
                         <p className="font-medium text-foreground mb-1">Free Tier Config:</p>
-                        <p>• EC2: t2.micro (750 hrs/month free)</p>
+                        <p>• EC2: t3.micro (750 hrs/month free)</p>
                         <p>• RDS: db.t3.micro, 20GB ({databaseEngine})</p>
                         <p>• Estimated cost: <span className="text-green-400 font-medium">$0.00/month</span> (within free tier)</p>
                       </div>
