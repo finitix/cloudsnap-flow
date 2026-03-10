@@ -674,6 +674,9 @@ export default function ProjectDetail() {
                       <StatusBadge status={d.status} />
                       <span className="text-sm capitalize">{d.provider}</span>
                       {["queued", "building", "deploying"].includes(d.status) && <RefreshCw className="h-3 w-3 animate-spin text-primary" />}
+                      {d.provider === "aws" && d.status === "deploying" && (
+                        <span className="text-[10px] text-muted-foreground">Auto-verifying every 30s...</span>
+                      )}
                       {(d as any).retry_count > 0 && (
                         <Badge variant="outline" className="text-[10px] gap-1">
                           <Zap className="h-2.5 w-2.5" /> {(d as any).retry_count} retries
@@ -686,6 +689,18 @@ export default function ProjectDetail() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* AWS Verify button for deploying state */}
+                      {d.provider === "aws" && d.status === "deploying" && d.deploy_id && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRedeploy(d.id)}
+                          disabled={redeploying === d.id}
+                          className="text-xs"
+                        >
+                          {redeploying === d.id ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Checking...</> : <><CheckCircle className="h-3 w-3 mr-1" />Verify Now</>}
+                        </Button>
+                      )}
                       {/* Auto-Heal button for failed deployments */}
                       {d.status === "error" && (
                         <Button
@@ -723,6 +738,14 @@ export default function ProjectDetail() {
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => handleDeleteDeployment(d.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </div>
+
+                  {/* AWS deploying status message */}
+                  {d.provider === "aws" && d.status === "deploying" && (
+                    <div className="bg-primary/5 text-primary text-xs rounded-lg p-2 flex items-center gap-2">
+                      <RefreshCw className="h-3 w-3 animate-spin shrink-0" />
+                      Instance is booting and installing your app. Auto-verification runs every 30s. This typically takes 3-5 minutes.
+                    </div>
+                  )}
 
                   {d.status === "live" && d.provider === "render" && (
                     <div className="bg-warning/10 text-warning text-xs rounded-lg p-2">⚠️ Free Render services spin down after ~15min of inactivity.</div>
