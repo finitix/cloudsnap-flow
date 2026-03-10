@@ -126,6 +126,41 @@ export default function ProjectDetail() {
     return () => { if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; } };
   }, [deployments, fetchDeployments]);
 
+  // Auto-verify AWS deployments stuck in "deploying" status every 30s
+  useEffect(() => {
+    const awsDeploying = deployments.find(
+      (d) => d.provider === "aws" && d.status === "deploying" && d.deploy_id
+    );
+
+    if (awsDeploying && !awsVerifyRef.current) {
+      const instanceId = awsDeploying.deploy_id;
+      const depId = awsDeploying.id;
+      const createdAt = new Date(awsDeploying.created_at).getTime();
+
+      awsVerifyRef.current = setInterval(async () => {
+        // Stop after 10 minutes
+        if (Date.now() - createdAt > 10 * 60 * 1000) {
+          if (awsVerifyRef.current) { clearInterval(awsVerifyRef.current); awsVerifyRef.current = null; }
+          return;
+        }
+        try {
+          const { data } = await supabase.functions.invoke("aws-deploy", {
+            body: { action: "verify-deployment", instanceId, deploymentId: depId },
+          });
+          if (data?.status === "live") {
+            toast.success("🎉 Application is live and responding!");
+            fetchDeployments();
+            if (awsVerifyRef.current) { clearInterval(awsVerifyRef.current); awsVerifyRef.current = null; }
+          }
+        } catch { /* silent retry */ }
+      }, 30000); // Check every 30 seconds
+    } else if (!awsDeploying && awsVerifyRef.current) {
+      clearInterval(awsVerifyRef.current);
+      awsVerifyRef.current = null;
+    }
+    return () => { if (awsVerifyRef.current) { clearInterval(awsVerifyRef.current); awsVerifyRef.current = null; } };
+  }, [deployments, fetchDeployments]);
+
   const getConn = () => connections.find((c) => c.id === selectedConnection);
   const getProviderDomain = () => {
     const conn = getConn();
