@@ -154,7 +154,7 @@ export default function AWSInfrastructureDashboard({ projectId, awsConnectionId,
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-3">
-          Free tier: t2.micro EC2{dbEngine !== "none" ? ` + db.t3.micro RDS (${dbEngine})` : ""} • Region: us-east-1
+          Free tier: t3.micro EC2{dbEngine !== "none" ? ` + db.t3.micro RDS (${dbEngine})` : ""} • Region: us-east-1
         </p>
       </div>
     );
