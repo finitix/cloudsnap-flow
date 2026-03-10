@@ -562,15 +562,17 @@ Deno.serve(async (req) => {
         await supabase.from("aws_infrastructure").update({ security_group_id: sgId, status: "launching_compute" }).eq("id", infra.id);
 
         // ── Step 5: Launch EC2 Instance ──
-        // Get latest Amazon Linux 2 AMI
+        // Get latest Amazon Linux 2023 AMI (free tier eligible with t3.micro)
         const amiRes = await ec2Action(creds, "DescribeImages", {
           "Owner.1": "amazon",
           "Filter.1.Name": "name",
-          "Filter.1.Value.1": "amzn2-ami-hvm-*-x86_64-gp2",
+          "Filter.1.Value.1": "al2023-ami-2023.*-x86_64",
           "Filter.2.Name": "state",
           "Filter.2.Value.1": "available",
+          "Filter.3.Name": "architecture",
+          "Filter.3.Value.1": "x86_64",
         });
-        let amiId = "ami-0c02fb55956c7d316"; // fallback
+        let amiId = "ami-0c02fb55956c7d316"; // fallback Amazon Linux 2
         const amiMatches = amiRes.rawText.match(/<imageId>(ami-[a-f0-9]+)<\/imageId>/g);
         if (amiMatches && amiMatches.length > 0) {
           amiId = amiMatches[0].replace(/<\/?imageId>/g, "");
