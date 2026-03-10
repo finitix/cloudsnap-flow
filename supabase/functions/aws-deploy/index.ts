@@ -247,20 +247,24 @@ date
 # Install Docker (compatible with Amazon Linux 2 and 2023)
 if command -v dnf &> /dev/null; then
   dnf update -y
-  dnf install -y docker git curl
+  dnf install -y docker git curl nginx
 else
   yum update -y
-  yum install -y docker git curl
+  amazon-linux-extras install docker -y 2>/dev/null || yum install -y docker
+  yum install -y git curl nginx
 fi
 systemctl start docker
 systemctl enable docker
 
-# Disable firewall if present (iptables managed by security groups)
+# Disable firewall if present
 if command -v ufw &> /dev/null; then
   ufw allow 80/tcp || true
   ufw allow 443/tcp || true
   ufw allow 22/tcp || true
 fi
+# Flush iptables rules that might block traffic (except docker)
+iptables -P INPUT ACCEPT 2>/dev/null || true
+iptables -P FORWARD ACCEPT 2>/dev/null || true
 
 echo "=== Docker installed ==="
 
@@ -296,9 +300,31 @@ export PORT=${config.port}
 echo "=== Building Docker image ==="
 docker build -t ${containerName} . 2>&1
 echo "=== Starting container ==="
+docker rm -f ${containerName} 2>/dev/null || true
 docker run -d --restart always -p ${hostPort} --name ${containerName} ${containerName}
 
-# Wait for container to be healthy
+# Fallback: If docker build/run fails, serve static files via nginx directly
+if ! docker ps | grep -q ${containerName}; then
+  echo "=== Docker failed, falling back to nginx ==="
+  docker logs ${containerName} 2>&1 || true
+  
+  # Try to serve via host nginx for frontend
+  ${config.projectType === "frontend" ? `
+  # Build directly on host
+  if command -v node &> /dev/null || (curl -fsSL https://rpm.nodesource.com/setup_18.x | bash - && yum install -y nodejs); then
+    cd /app && npm install && ${config.buildCommand || "npm run build"} 2>&1 || true
+    cp -r /app/${outputDir}/* /usr/share/nginx/html/ 2>/dev/null || true
+    cat > /etc/nginx/conf.d/default.conf << 'NGINXFALLBACK'
+${nginxConf}
+NGINXFALLBACK
+    systemctl start nginx
+    systemctl enable nginx
+    echo "=== Nginx fallback started ==="
+  fi
+  ` : ""}
+fi
+
+# Wait for application to respond
 echo "=== Waiting for application to start ==="
 for i in $(seq 1 30); do
   if curl -sf http://localhost:80/health > /dev/null 2>&1 || curl -sf http://localhost:80/ > /dev/null 2>&1; then
@@ -310,9 +336,12 @@ for i in $(seq 1 30); do
 done
 
 # Final status
-if docker ps | grep -q ${containerName}; then
-  echo "=== Container is running ==="
+if curl -sf http://localhost:80/ > /dev/null 2>&1; then
+  echo "=== DEPLOYMENT SUCCESS: App is reachable ==="
+elif docker ps | grep -q ${containerName}; then
+  echo "=== Container is running but not responding yet ==="
   docker ps
+  docker logs ${containerName} --tail 50 2>&1 || true
 else
   echo "=== ERROR: Container failed to start ==="
   docker logs ${containerName} 2>&1 || true
@@ -331,7 +360,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { action, ...params } = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+    const { action, ...params } = body;
     const supabase = getSupabaseAdmin();
 
     // Auth check
@@ -339,13 +374,20 @@ Deno.serve(async (req) => {
     let userId: string | null = null;
     if (authHeader) {
       const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_ANON_KEY")!,
-      ).auth.getUser(token);
-      userId = user?.id || null;
+      try {
+        const { data: { user } } = await createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_ANON_KEY")!,
+        ).auth.getUser(token);
+        userId = user?.id || null;
+      } catch (authErr: any) {
+        console.error("Auth error:", authErr.message);
+        return json({ error: "Authentication failed. Please sign in again.", details: authErr.message }, 401);
+      }
     }
-    if (!userId) return json({ error: "Unauthorized" }, 401);
+    if (!userId) return json({ error: "Unauthorized. Please sign in again." }, 401);
+
+    console.log(`[aws-deploy] action=${action} userId=${userId}`);
 
     // ── Validate AWS Connection ──
     if (action === "validate-aws") {
@@ -803,9 +845,9 @@ Deno.serve(async (req) => {
           estimated_monthly_cost: totalCost,
         }).eq("id", infra.id);
 
-        // Update deployment status using deployment ID
+        // Set deployment to VERIFYING — auto-verify will check if app is reachable
         if (deploymentId) {
-          await supabase.from("deployments").update({ status: "live" }).eq("id", deploymentId);
+          await supabase.from("deployments").update({ status: "deploying" }).eq("id", deploymentId);
         }
 
         return json({

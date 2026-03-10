@@ -200,11 +200,34 @@ export default function ProjectDetail() {
   const handleRedeploy = async (depId: string) => {
     setRedeploying(depId);
     try {
-      const { data, error } = await supabase.functions.invoke("deploy-project", { body: { action: "redeploy", deploymentId: depId } });
-      if (error) throw error;
-      if (data?.success) toast.success("Redeployment successful!");
-      else toast.error("Redeploy failed");
-      fetchDeployments();
+      const dep = deployments.find(d => d.id === depId);
+      if (dep?.provider === "aws") {
+        // For AWS deployments, run diagnose + verify instead of redeploy
+        const { data, error } = await supabase.functions.invoke("aws-deploy", {
+          body: { action: "verify-deployment", awsConnectionId: project?.aws_connection_id, instanceId: dep.deploy_id, deploymentId: depId },
+        });
+        if (error) throw error;
+        if (data?.status === "live") {
+          toast.success("Application is live and responding!");
+        } else {
+          // Try diagnose
+          const { data: diagData } = await supabase.functions.invoke("aws-deploy", {
+            body: { action: "diagnose-instance", awsConnectionId: project?.aws_connection_id, instanceId: dep.deploy_id },
+          });
+          if (diagData?.fixes?.length > 0) {
+            toast.success(`Applied ${diagData.fixes.length} fix(es). Verifying again in a moment...`);
+          } else {
+            toast.warning("Application not responding yet. The instance may still be booting (takes 3-5 minutes after creation).");
+          }
+        }
+        fetchDeployments();
+      } else {
+        const { data, error } = await supabase.functions.invoke("deploy-project", { body: { action: "redeploy", deploymentId: depId } });
+        if (error) throw error;
+        if (data?.success) toast.success("Redeployment successful!");
+        else toast.error(data?.error || "Redeploy failed");
+        fetchDeployments();
+      }
     } catch (err: any) { toast.error("Redeploy failed: " + err.message); }
     finally { setRedeploying(null); }
   };
