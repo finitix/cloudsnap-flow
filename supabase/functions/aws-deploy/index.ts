@@ -845,9 +845,9 @@ Deno.serve(async (req) => {
           estimated_monthly_cost: totalCost,
         }).eq("id", infra.id);
 
-        // Update deployment status using deployment ID
+        // Set deployment to VERIFYING — auto-verify will check if app is reachable
         if (deploymentId) {
-          await supabase.from("deployments").update({ status: "live" }).eq("id", deploymentId);
+          await supabase.from("deployments").update({ status: "deploying" }).eq("id", deploymentId);
         }
 
         return json({
