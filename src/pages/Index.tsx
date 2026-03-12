@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import PublicLayout from "@/components/PublicLayout";
+import SEOHead from "@/components/SEOHead";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -85,6 +86,33 @@ export default function Index() {
 
   return (
     <PublicLayout>
+      <SEOHead
+        title="Cloudsnap Studio — Deploy Anywhere, Monitor Everything"
+        description="One dashboard to deploy and manage all your clouds. Connect AWS, Vercel, Railway, and more. One-click deploy with AI auto-healing."
+        canonical="https://cloudsnap.studio"
+        keywords="cloud deployment platform, automated cloud deployment, one click deployment, deploy app to cloud, devops automation, multi cloud deployment, Cloudsnap Studio"
+        jsonLd={[
+          {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "Cloudsnap Studio",
+            applicationCategory: "DeveloperApplication",
+            operatingSystem: "Web",
+            description: "Automated cloud deployment platform with AI-powered stack detection, one-click deploy, and auto-healing for AWS, Vercel, Render, and more.",
+            url: "https://cloudsnap.studio",
+            offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+            author: { "@type": "Organization", name: "Finitix" },
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            name: "Cloudsnap Studio",
+            url: "https://cloudsnap.studio",
+            logo: "https://cloudsnap.studio/favicon.ico",
+            sameAs: ["https://twitter.com/cloudsnap", "https://github.com/cloudsnap"],
+          },
+        ]}
+      />
       {/* ═══ HERO ═══ */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none">
