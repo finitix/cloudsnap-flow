@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { useAdmin } from "@/hooks/useAdmin";
+import { lazy, Suspense } from "react";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -18,7 +19,6 @@ import About from "./pages/About";
 import Reviews from "./pages/Reviews";
 import ContactSupport from "./pages/ContactSupport";
 import Features from "./pages/Features";
-// Integrations merged into Features page
 import Pricing from "./pages/Pricing";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
@@ -31,7 +31,27 @@ import AdminReviews from "./pages/AdminReviews";
 import AdminMessages from "./pages/AdminMessages";
 import NotFound from "./pages/NotFound";
 
+// SEO Landing Pages (lazy loaded)
+const DeployReactApp = lazy(() => import("./pages/seo/DeployReactApp"));
+const DeployNodejsApi = lazy(() => import("./pages/seo/DeployNodejsApi"));
+const DeployPythonApi = lazy(() => import("./pages/seo/DeployPythonApi"));
+const DeployFullstackApp = lazy(() => import("./pages/seo/DeployFullstackApp"));
+const DeployDockerApp = lazy(() => import("./pages/seo/DeployDockerApp"));
+const DeployToAws = lazy(() => import("./pages/seo/DeployToAws"));
+const DeployToAzure = lazy(() => import("./pages/seo/DeployToAzure"));
+const DeployToGcp = lazy(() => import("./pages/seo/DeployToGcp"));
+const AutomatedCloudDeployment = lazy(() => import("./pages/seo/AutomatedCloudDeployment"));
+const GithubAutoDeploy = lazy(() => import("./pages/seo/GithubAutoDeploy"));
+const MultiCloudDeployment = lazy(() => import("./pages/seo/MultiCloudDeployment"));
+const AiDeploymentPlatform = lazy(() => import("./pages/seo/AiDeploymentPlatform"));
+
 const queryClient = new QueryClient();
+
+const LazyPage = ({ children }: { children: React.ReactNode }) => (
+  <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Loading...</div>}>
+    {children}
+  </Suspense>
+);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -40,7 +60,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Routes only for regular (non-admin) users. Admins get redirected to /admin. */
 function UserRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const { isAdmin, loading: adminLoading } = useAdmin();
@@ -72,6 +91,22 @@ const AppRoutes = () => (
     <Route path="/support" element={<ContactSupport />} />
     <Route path="/terms" element={<Terms />} />
     <Route path="/privacy" element={<Privacy />} />
+
+    {/* SEO Landing Pages */}
+    <Route path="/deploy-react-app" element={<LazyPage><DeployReactApp /></LazyPage>} />
+    <Route path="/deploy-nodejs-api" element={<LazyPage><DeployNodejsApi /></LazyPage>} />
+    <Route path="/deploy-python-api" element={<LazyPage><DeployPythonApi /></LazyPage>} />
+    <Route path="/deploy-fullstack-app" element={<LazyPage><DeployFullstackApp /></LazyPage>} />
+    <Route path="/deploy-docker-app" element={<LazyPage><DeployDockerApp /></LazyPage>} />
+    <Route path="/deploy-to-aws" element={<LazyPage><DeployToAws /></LazyPage>} />
+    <Route path="/deploy-to-azure" element={<LazyPage><DeployToAzure /></LazyPage>} />
+    <Route path="/deploy-to-gcp" element={<LazyPage><DeployToGcp /></LazyPage>} />
+    <Route path="/automated-cloud-deployment" element={<LazyPage><AutomatedCloudDeployment /></LazyPage>} />
+    <Route path="/github-auto-deploy" element={<LazyPage><GithubAutoDeploy /></LazyPage>} />
+    <Route path="/multi-cloud-deployment" element={<LazyPage><MultiCloudDeployment /></LazyPage>} />
+    <Route path="/ai-deployment-platform" element={<LazyPage><AiDeploymentPlatform /></LazyPage>} />
+
+    {/* Protected Routes */}
     <Route path="/dashboard" element={<UserRoute><Dashboard /></UserRoute>} />
     <Route path="/projects" element={<UserRoute><Projects /></UserRoute>} />
     <Route path="/projects/:id" element={<UserRoute><ProjectDetail /></UserRoute>} />
